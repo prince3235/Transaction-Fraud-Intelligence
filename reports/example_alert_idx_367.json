@@ -1,0 +1,59 @@
+{
+  "alert_id": "ALT-20260412060046",
+  "transaction_ref": "test_index_367",
+  "created_at_utc": "2026-04-12T06:00:46.783950+00:00",
+  "fraud_probability": 1.0,
+  "risk_score": 100,
+  "risk_level": "CRITICAL",
+  "recommended_action": "HOLD transaction + immediate manual review",
+  "top_reasons": [
+    {
+      "feature": "balance_error_orig",
+      "value": 0.0,
+      "shap_contribution": 0.09430071859414957,
+      "reason_text": "Origin balance update is inconsistent with expected transaction logic."
+    },
+    {
+      "feature": "transactions_in_step",
+      "value": 16.0,
+      "shap_contribution": 0.0742334691627614,
+      "reason_text": "High activity at this time step (transactions_in_step=16.0)."
+    },
+    {
+      "feature": "expected_balance_change_orig",
+      "value": 0.0,
+      "shap_contribution": 0.06628538448233963,
+      "reason_text": "expected_balance_change_orig contributed to fraud risk."
+    },
+    {
+      "feature": "amount_to_oldbalance_orig_ratio",
+      "value": 1.0,
+      "shap_contribution": 0.06281793908166683,
+      "reason_text": "Amount is high relative to sender's old balance (ratio=1.00)."
+    },
+    {
+      "feature": "balance_change_orig",
+      "value": -759701.0,
+      "shap_contribution": 0.060499614803778023,
+      "reason_text": "balance_change_orig contributed to fraud risk."
+    },
+    {
+      "feature": "sender_account_emptied",
+      "value": 1.0,
+      "shap_contribution": 0.05672733938073125,
+      "reason_text": "Sender account became zero after transaction (account emptied)."
+    },
+    {
+      "feature": "type_risk_score",
+      "value": 3.0,
+      "shap_contribution": 0.03053506746739284,
+      "reason_text": "Transaction type has higher fraud risk weight (risk score=3.0)."
+    },
+    {
+      "feature": "newbalanceOrig",
+      "value": 0.0,
+      "shap_contribution": 0.01779641404635807,
+      "reason_text": "newbalanceOrig contributed to fraud risk."
+    }
+  ]
+}
