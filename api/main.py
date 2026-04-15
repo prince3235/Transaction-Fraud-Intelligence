@@ -1,20 +1,24 @@
-from __future__ import annotations
-
-import joblib
-import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from pathlib import Path
 
-from src.features import build_features, load_feature_config
+import joblib
+
+from src.features import build_features, align_to_model_columns, load_json
 from src.risk_scoring import score_probability
 from src.alerts import create_alert, should_alert
 
 app = FastAPI(title="Transaction Fraud Intelligence API", version="1.0.0")
 
-MODEL_PATH = "../models/best_fraud_model.pkl"
+BASE_DIR = Path(__file__).resolve().parents[1]  # project root
+
+MODEL_PATH = BASE_DIR / "models" / "best_fraud_model.pkl"
+CONFIG_PATH = BASE_DIR / "models" / "feature_config.json"
+COLS_PATH   = BASE_DIR / "models" / "feature_columns.json"
 
 model = joblib.load(MODEL_PATH)
-config = load_feature_config("../models/feature_config.json")
+config = load_json(CONFIG_PATH)
+model_columns = load_json(COLS_PATH)
 
 
 class TransactionIn(BaseModel):
@@ -35,11 +39,11 @@ def health():
 @app.post("/predict")
 def predict(tx: TransactionIn):
     X = build_features(tx.model_dump(), config)
+    X = align_to_model_columns(X, model_columns)
 
     prob = float(model.predict_proba(X)[:, 1][0])
     risk = score_probability(prob)
 
-    # alert creation (only if MEDIUM+)
     alert = None
     if should_alert(risk.risk_level, min_level="MEDIUM"):
         alert_obj = create_alert(
@@ -53,7 +57,7 @@ def predict(tx: TransactionIn):
         alert = alert_obj.__dict__
 
     return {
-        "probability": risk.probability,
+        "fraud_probability": risk.probability,
         "risk_score": risk.risk_score,
         "risk_level": risk.risk_level,
         "recommended_action": risk.recommended_action,
