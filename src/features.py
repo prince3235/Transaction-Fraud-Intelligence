@@ -129,3 +129,8 @@ def align_to_model_columns(X: pd.DataFrame, model_columns: List[str]) -> pd.Data
 
     X_aligned = X_aligned[model_columns]
     return X_aligned
+
+def load_feature_config() -> dict:
+    from pathlib import Path
+    config_path = Path(__file__).resolve().parent.parent / "models" / "feature_config.json"
+    return load_json(config_path) 
