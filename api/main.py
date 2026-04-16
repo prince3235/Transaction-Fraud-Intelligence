@@ -1,20 +1,20 @@
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
 from pathlib import Path
 
 import joblib
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
 
 from src.features import build_features, align_to_model_columns, load_json
-from src.risk_scoring import score_probability
+from src.risk_scoring import score_probability, apply_policy_overrides
 from src.alerts import create_alert, should_alert
 
 app = FastAPI(title="Transaction Fraud Intelligence API", version="1.0.0")
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # project root
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 MODEL_PATH = BASE_DIR / "models" / "best_fraud_model.pkl"
 CONFIG_PATH = BASE_DIR / "models" / "feature_config.json"
-COLS_PATH   = BASE_DIR / "models" / "feature_columns.json"
+COLS_PATH = BASE_DIR / "models" / "feature_columns.json"
 
 model = joblib.load(MODEL_PATH)
 config = load_json(CONFIG_PATH)
@@ -38,15 +38,21 @@ def health():
 
 @app.post("/predict")
 def predict(tx: TransactionIn):
+    # 1) Build + align features
     X = build_features(tx.model_dump(), config)
     X = align_to_model_columns(X, model_columns)
 
+    # 2) Model probability
     prob = float(model.predict_proba(X)[:, 1][0])
+
+    # 3) Base risk scoring
     risk = score_probability(prob)
-    
-from src.risk_scoring import apply_policy_overrides
 
+    # 4) Policy override (rule-based guardrails)
+    features_dict = X.iloc[0].to_dict()
+    risk = apply_policy_overrides(risk, features_dict)
 
+    # 5) Create alert if needed
     alert = None
     if should_alert(risk.risk_level, min_level="MEDIUM"):
         alert_obj = create_alert(
@@ -66,6 +72,3 @@ from src.risk_scoring import apply_policy_overrides
         "recommended_action": risk.recommended_action,
         "alert": alert,
     }
-
-features_dict = X.iloc[0].to_dict()
-risk = apply_policy_overrides(risk, features_dict)
