@@ -43,6 +43,9 @@ def predict(tx: TransactionIn):
 
     prob = float(model.predict_proba(X)[:, 1][0])
     risk = score_probability(prob)
+    
+from src.risk_scoring import apply_policy_overrides
+
 
     alert = None
     if should_alert(risk.risk_level, min_level="MEDIUM"):
@@ -63,3 +66,6 @@ def predict(tx: TransactionIn):
         "recommended_action": risk.recommended_action,
         "alert": alert,
     }
+
+features_dict = X.iloc[0].to_dict()
+risk = apply_policy_overrides(risk, features_dict)
