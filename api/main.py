@@ -42,33 +42,43 @@ def predict(tx: TransactionIn):
     X = build_features(tx.model_dump(), config)
     X = align_to_model_columns(X, model_columns)
 
-    # 2) Model probability
-    prob = float(model.predict_proba(X)[:, 1][0])
+    # 2) ML probability
+    ml_prob = float(model.predict_proba(X)[:, 1][0])
 
-    # 3) Base risk scoring
-    risk = score_probability(prob)
+    # 3) Base risk from ML
+    base_risk = score_probability(ml_prob)
 
-    # 4) Policy override (rule-based guardrails)
+    # 4) Policy override (may return RiskResult OR (RiskResult, reasons))
     features_dict = X.iloc[0].to_dict()
-    risk = apply_policy_overrides(risk, features_dict)
+    policy_out = apply_policy_overrides(base_risk, features_dict)
+
+    if isinstance(policy_out, tuple):
+        final_risk, policy_reasons = policy_out
+    else:
+        final_risk, policy_reasons = policy_out, []
 
     # 5) Create alert if needed
     alert = None
-    if should_alert(risk.risk_level, min_level="MEDIUM"):
+    if should_alert(final_risk.risk_level, min_level="MEDIUM"):
         alert_obj = create_alert(
             transaction_ref="api_input",
-            probability=risk.probability,
-            risk_score=risk.risk_score,
-            risk_level=risk.risk_level,
-            recommended_action=risk.recommended_action,
-            reasons=[],
+            probability=final_risk.probability,
+            risk_score=final_risk.risk_score,
+            risk_level=final_risk.risk_level,
+            recommended_action=final_risk.recommended_action,
+            reasons=[{"reason": r} for r in policy_reasons],
         )
         alert = alert_obj.__dict__
 
+    # 6) Return both ML + Final (business) outputs
     return {
-        "fraud_probability": risk.probability,
-        "risk_score": risk.risk_score,
-        "risk_level": risk.risk_level,
-        "recommended_action": risk.recommended_action,
+        "ml_probability": round(ml_prob, 6),
+        "ml_risk_score": base_risk.risk_score,
+        "ml_risk_level": base_risk.risk_level,
+        "final_risk_score": final_risk.risk_score,
+        "final_risk_level": final_risk.risk_level,
+        "recommended_action": final_risk.recommended_action,
+        "policy_override_applied": (final_risk.risk_level != base_risk.risk_level),
+        "policy_reasons": policy_reasons,
         "alert": alert,
     }
