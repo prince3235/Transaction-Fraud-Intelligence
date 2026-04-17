@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 
 import joblib
 from fastapi import FastAPI
@@ -7,8 +8,9 @@ from pydantic import BaseModel, Field
 from src.features import build_features, align_to_model_columns, load_json
 from src.risk_scoring import score_probability, apply_policy_overrides
 from src.alerts import create_alert, should_alert
+from src.storage import get_db_path, init_db, log_prediction, fetch_recent_logs
 
-app = FastAPI(title="Transaction Fraud Intelligence API", version="1.0.0")
+app = FastAPI(title="Transaction Fraud Intelligence API", version="1.1.0")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -19,6 +21,9 @@ COLS_PATH = BASE_DIR / "models" / "feature_columns.json"
 model = joblib.load(MODEL_PATH)
 config = load_json(CONFIG_PATH)
 model_columns = load_json(COLS_PATH)
+
+DB_PATH = get_db_path(BASE_DIR)
+init_db(DB_PATH)
 
 
 class TransactionIn(BaseModel):
@@ -33,22 +38,19 @@ class TransactionIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "db_path": str(DB_PATH)}
 
 
-@app.post("/predict")
-def predict(tx: TransactionIn):
-    # 1) Build + align features
-    X = build_features(tx.model_dump(), config)
+def score_tx(tx_dict: dict):
+    # Build + align features
+    X = build_features(tx_dict, config)
     X = align_to_model_columns(X, model_columns)
 
-    # 2) ML probability
+    # ML probability
     ml_prob = float(model.predict_proba(X)[:, 1][0])
-
-    # 3) Base risk from ML
     base_risk = score_probability(ml_prob)
 
-    # 4) Policy override (may return RiskResult OR (RiskResult, reasons))
+    # Policy override
     features_dict = X.iloc[0].to_dict()
     policy_out = apply_policy_overrides(base_risk, features_dict)
 
@@ -57,7 +59,7 @@ def predict(tx: TransactionIn):
     else:
         final_risk, policy_reasons = policy_out, []
 
-    # 5) Create alert if needed
+    # Alert (MEDIUM+)
     alert = None
     if should_alert(final_risk.risk_level, min_level="MEDIUM"):
         alert_obj = create_alert(
@@ -70,9 +72,37 @@ def predict(tx: TransactionIn):
         )
         alert = alert_obj.__dict__
 
-    # 6) Return both ML + Final (business) outputs
+    # for debugging
+    suspicious_signal_count = int(features_dict.get("suspicious_signal_count", 0))
+
+    return X, ml_prob, base_risk, final_risk, policy_reasons, alert, suspicious_signal_count
+
+
+@app.post("/predict")
+def predict(tx: TransactionIn):
+    tx_dict = tx.model_dump()
+    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc = score_tx(tx_dict)
+
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    # Log to SQLite
+    log_prediction(
+        db_path=DB_PATH,
+        created_at=created_at,
+        transaction=tx_dict,
+        ml_probability=ml_prob,
+        ml_risk_level=base_risk.risk_level,
+        ml_risk_score=base_risk.risk_score,
+        final_risk_level=final_risk.risk_level,
+        final_risk_score=final_risk.risk_score,
+        policy_override_applied=(final_risk.risk_level != base_risk.risk_level),
+        policy_reasons=policy_reasons,
+        suspicious_signal_count=ssc,
+        alert=alert,
+    )
+
     return {
-        "ml_probability": round(ml_prob, 6),
+        "ml_probability": ml_prob,  # no rounding
         "ml_risk_score": base_risk.risk_score,
         "ml_risk_level": base_risk.risk_level,
         "final_risk_score": final_risk.risk_score,
@@ -82,3 +112,49 @@ def predict(tx: TransactionIn):
         "policy_reasons": policy_reasons,
         "alert": alert,
     }
+
+
+@app.post("/debug/predict")
+def debug_predict(tx: TransactionIn):
+    tx_dict = tx.model_dump()
+    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc = score_tx(tx_dict)
+
+    # Only show selected important engineered features (not full row)
+    cols_to_show = [
+        "amount",
+        "oldbalanceOrg",
+        "newbalanceOrig",
+        "oldbalanceDest",
+        "newbalanceDest",
+        "log_amount",
+        "amount_to_oldbalance_orig_ratio",
+        "sender_account_emptied",
+        "dest_received_large_amount",
+        "is_large_transaction",
+        "balance_error_orig",
+        "balance_error_dest",
+        "transactions_in_step",
+        "is_high_velocity_step",
+        "type_encoded",
+        "type_risk_score",
+        "suspicious_signal_count",
+    ]
+    debug_features = {c: float(X.iloc[0][c]) if c in X.columns else None for c in cols_to_show}
+
+    return {
+        "input_transaction": tx_dict,
+        "debug_features": debug_features,
+        "ml_probability": ml_prob,
+        "ml_risk_level": base_risk.risk_level,
+        "ml_risk_score": base_risk.risk_score,
+        "final_risk_level": final_risk.risk_level,
+        "final_risk_score": final_risk.risk_score,
+        "policy_override_applied": (final_risk.risk_level != base_risk.risk_level),
+        "policy_reasons": policy_reasons,
+        "alert": alert,
+    }
+
+
+@app.get("/logs/recent")
+def recent_logs(limit: int = 50):
+    return {"limit": limit, "items": fetch_recent_logs(DB_PATH, limit=limit)}
