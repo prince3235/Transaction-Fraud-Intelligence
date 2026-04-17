@@ -2,3 +2,4 @@ transaction_data.csv
 *.csv
 .ipynb_checkpoints/
 data/raw/
+data/app_db/
