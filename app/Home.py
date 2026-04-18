@@ -1,4 +1,17 @@
 from pathlib import Path
+import sys
+
+# ✅ IMPORTANT: Add project root to sys.path BEFORE any local imports
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Now imports will work
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+from app.utils_dashboard import get_db_path, load_logs_df
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
