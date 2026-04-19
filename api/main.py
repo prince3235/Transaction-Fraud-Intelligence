@@ -1,3 +1,6 @@
+from datetime import timedelta
+import random
+
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -244,7 +247,11 @@ def seed_logs(count: int = 1000):
     sample_df = sample_df[model_columns]
 
     ml_probs = model.predict_proba(sample_df)[:, 1]
-    created_at = datetime.now(timezone.utc).isoformat()
+    
+    import random
+    from datetime import timedelta
+    offset_minutes = random.randint(0, 60*24*7)
+    created_at = (datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)).isoformat()
 
     rows = []
     for i, (_, row) in enumerate(sample_df.iterrows()):
@@ -299,3 +306,77 @@ def seed_logs(count: int = 1000):
     con.close()
 
     return {"status": "ok", "inserted": len(rows)}    
+
+
+# ========== ADMIN & MONITORING ENDPOINTS ==========
+
+@app.get("/stats")
+def get_stats():
+    """Get system-level statistics for monitoring"""
+    import sqlite3
+    import pandas as pd
+    
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    
+    total = con.execute("SELECT COUNT(*) FROM prediction_logs").fetchone()[0]
+    
+    risk_dist = pd.read_sql_query(
+        "SELECT final_risk_level, COUNT(*) as count FROM prediction_logs GROUP BY final_risk_level",
+        con
+    ).to_dict(orient="records")
+    
+    override_rate = con.execute(
+        "SELECT AVG(policy_override_applied)*100 FROM prediction_logs"
+    ).fetchone()[0]
+    
+    avg_score = con.execute(
+        "SELECT AVG(final_risk_score) FROM prediction_logs"
+    ).fetchone()[0]
+    
+    con.close()
+    
+    return {
+        "total_scored": total,
+        "risk_distribution": risk_dist,
+        "override_rate_pct": round(override_rate, 2) if override_rate else 0,
+        "avg_risk_score": round(avg_score, 2) if avg_score else 0
+    }
+
+
+@app.get("/logs/{log_id}/explain")
+def explain_log(log_id: int):
+    """Get detailed explanation for a specific log entry"""
+    import sqlite3
+    import json
+    
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cur = con.cursor()
+    
+    row = cur.execute(
+        """SELECT transaction_json, ml_probability, ml_risk_level, ml_risk_score,
+                  final_risk_level, final_risk_score, policy_override_applied, policy_reasons_json
+           FROM prediction_logs WHERE id = ?""",
+        (int(log_id),)
+    ).fetchone()
+    
+    con.close()
+    
+    if not row:
+        return {"error": "log not found"}
+    
+    return {
+        "log_id": log_id,
+        "transaction": json.loads(row[0]),
+        "ml": {
+            "probability": row[1],
+            "level": row[2],
+            "score": row[3]
+        },
+        "final": {
+            "level": row[4],
+            "score": row[5]
+        },
+        "override_applied": bool(row[6]),
+        "override_reasons": json.loads(row[7]) if row[7] else [],
+        "explanation": "ML model assessed base risk. Policy engine may have elevated it based on business rules."
+    }    
