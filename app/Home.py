@@ -28,231 +28,251 @@ total_count = get_total_count(DB_PATH)
 df = load_logs_df(DB_PATH, limit=10000)
 
 # ========== HEADER ==========
-col_h1, col_h2 = st.columns([3.5, 1])
+col_h1, col_h2 = st.columns([4, 1])
 
 with col_h1:
-    st.markdown("# Fraud Intelligence Platform")
-    st.markdown('<p class="subtitle">Real-time Transaction Monitoring & Risk Intelligence System</p>', 
-                unsafe_allow_html=True)
+    st.markdown("""
+    <div class="page-header">
+        <div class="header-badge">LIVE MONITORING</div>
+        <h1>Fraud Intelligence<br><span class="gradient-text">Platform</span></h1>
+        <p class="subtitle">Real-time Transaction Monitoring &amp; Risk Intelligence System</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 with col_h2:
-    if st.button("🔄 Refresh", use_container_width=True):
+    st.markdown('<div style="height:60px"></div>', unsafe_allow_html=True)
+    if st.button("↻  Refresh Data", use_container_width=True):
         st.rerun()
 
-st.markdown("---")
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 # ========== DATA CHECK ==========
 if df.empty:
-    st.info("⚠️ No transaction logs found. Generate sample data: `/admin/seed-logs?count=2000`")
+    st.info("⚠️  No transaction logs found. Generate sample data via `/admin/seed-logs?count=2000`")
     st.stop()
 
 # ========== METRICS ==========
-critical = int((df["final_risk_level"] == "CRITICAL").sum())
-high = int((df["final_risk_level"] == "HIGH").sum())
+critical  = int((df["final_risk_level"] == "CRITICAL").sum())
+high      = int((df["final_risk_level"] == "HIGH").sum())
 override_rate = float(df["policy_override_applied"].mean() * 100)
 avg_score = float(df["final_risk_score"].mean())
 
 # ========== KPI CARDS ==========
 m1, m2, m3, m4, m5 = st.columns(5)
 
-with m1:
-    st.metric(
-        label="Total Transactions",
-        value=f"{total_count:,}",
-        delta="All time"
-    )
+cards = [
+    (m1, "Total Transactions", f"{total_count:,}",     "All time",                                                   "blue"),
+    (m2, "Critical Alerts",    f"{critical:,}",         f"{critical/total_count*100:.2f}% of total" if total_count else "0%", "red"),
+    (m3, "High Risk",          f"{high:,}",             f"{high/total_count*100:.2f}% of total"     if total_count else "0%", "orange"),
+    (m4, "Override Rate",      f"{override_rate:.1f}%", f"{int(df['policy_override_applied'].sum()):,} triggers",    "purple"),
+    (m5, "Avg Risk Score",     f"{avg_score:.0f}",      "out of 100",                                                 "teal"),
+]
 
-with m2:
-    st.metric(
-        label="Critical Alerts",
-        value=f"{critical:,}",
-        delta=f"{critical/total_count*100:.2f}%" if total_count else "0%"
-    )
+for col, label, value, delta, color in cards:
+    with col:
+        st.markdown(f"""
+        <div class="kpi-card kpi-{color}">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+            <div class="kpi-delta">{delta}</div>
+            <div class="kpi-glow"></div>
+        </div>
+        """, unsafe_allow_html=True)
 
-with m3:
-    st.metric(
-        label="High Risk",
-        value=f"{high:,}",
-        delta=f"{high/total_count*100:.2f}%" if total_count else "0%"
-    )
-
-with m4:
-    st.metric(
-        label="Override Rate",
-        value=f"{override_rate:.1f}%",
-        delta=f"{int(df['policy_override_applied'].sum()):,} triggers"
-    )
-
-with m5:
-    st.metric(
-        label="Avg Risk Score",
-        value=f"{avg_score:.0f}",
-        delta="/ 100"
-    )
-
-st.markdown("---")
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 # ========== CHARTS ==========
 chart_left, chart_right = st.columns([1, 1])
 
-# ---- DONUT CHART (Enhanced) ----
+# ─── DONUT CHART ───────────────────────────────────────────────
 with chart_left:
-    st.markdown("### Risk Distribution")
-    
+    st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+    st.markdown('<div class="chart-title">Risk Distribution</div>', unsafe_allow_html=True)
+
     dist_data = df["final_risk_level"].value_counts()
-    
+
+    DONUT_COLORS = {
+        "LOW":      "#10B981",
+        "MEDIUM":   "#F59E0B",
+        "HIGH":     "#F97316",
+        "CRITICAL": "#EF4444",
+    }
+    ordered_labels = [l for l in ["LOW", "MEDIUM", "HIGH", "CRITICAL"] if l in dist_data.index]
+    ordered_values = [dist_data[l] for l in ordered_labels]
+    ordered_colors = [DONUT_COLORS.get(l, "#94A3B8") for l in ordered_labels]
+
     fig_donut = go.Figure(data=[go.Pie(
-        labels=dist_data.index,
-        values=dist_data.values,
-        hole=0.7,
+        labels=ordered_labels,
+        values=ordered_values,
+        hole=0.72,
         marker=dict(
-            colors=['#86EFAC', '#FCD34D', '#FDBA74', '#F87171'],
-            line=dict(color='#0A0E1A', width=3)
+            colors=ordered_colors,
+            line=dict(color='#080C14', width=4)
         ),
-        textfont=dict(size=14, color='#F1F5F9', family='Inter', weight=700),
-        textposition='outside',
-        hovertemplate='<b>%{label}</b><br>%{value:,} transactions<br>%{percent}<extra></extra>'
+        textinfo='none',
+        hovertemplate='<b>%{label}</b><br>%{value:,} transactions<br>%{percent}<extra></extra>',
+        sort=False,
     )])
-    
+
     fig_donut.update_layout(
         showlegend=True,
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=-0.25,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=13, color='#CBD5E1', family='Inter', weight=600)
+            yanchor="bottom", y=-0.22,
+            xanchor="center", x=0.5,
+            font=dict(size=12, color='#94A3B8', family='DM Sans'),
+            itemsizing='constant',
+            traceorder='normal',
         ),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=10, r=10, t=30, b=100),
-        height=420,
+        margin=dict(l=20, r=20, t=30, b=110),
+        height=400,
         annotations=[dict(
-            text=f'<b style="font-size:38px;color:#F8FAFC">{total_count:,}</b><br>'
-                 f'<span style="font-size:12px;color:#94A3B8;font-weight:700;letter-spacing:0.1em">TOTAL</span>',
+            text=f'<b>{total_count:,}</b><br><span style="font-size:11px;letter-spacing:0.12em">TOTAL</span>',
             x=0.5, y=0.5,
-            font=dict(family='Inter'),
-            showarrow=False
+            font=dict(family='DM Sans', size=32, color='#F1F5F9'),
+            showarrow=False,
+            align='center',
         )]
     )
-    
-    st.plotly_chart(fig_donut, use_container_width=True)
 
-# ---- LINE CHART (Premium Blue) ----
+    st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ─── LINE CHART ────────────────────────────────────────────────
 with chart_right:
-    st.markdown("### Alert Trend (14 Days)")
-    
+    st.markdown('<div class="chart-card">', unsafe_allow_html=True)
+    st.markdown('<div class="chart-title">Alert Trend — Last 14 Days</div>', unsafe_allow_html=True)
+
     tmp = df.dropna(subset=["created_at"]).copy()
     tmp = tmp[tmp["final_risk_level"].isin(["HIGH", "CRITICAL"])]
-    
+
     if tmp.empty:
-        st.info("No high-risk alerts")
+        st.info("No high-risk alerts found")
     else:
         tmp["date"] = tmp["created_at"].dt.floor("D")
-        alerts = tmp.groupby("date").size().reset_index(name="count")
-        alerts = alerts.tail(14)
-        
+        alerts = tmp.groupby("date").size().reset_index(name="count").tail(14)
+
         fig_line = go.Figure()
-        
+
+        # Fill area
+        fig_line.add_trace(go.Scatter(
+            x=alerts["date"],
+            y=alerts["count"],
+            mode='none',
+            fill='tozeroy',
+            fillcolor='rgba(59,130,246,0.07)',
+            showlegend=False,
+            hoverinfo='skip',
+        ))
+
+        # Main line
         fig_line.add_trace(go.Scatter(
             x=alerts["date"],
             y=alerts["count"],
             mode='lines+markers',
-            fill='tozeroy',
-            line=dict(
-                color='#3B82F6',
-                width=3.5,
-                shape='spline',
-                smoothing=1.3
-            ),
+            line=dict(color='#3B82F6', width=2.5, shape='spline', smoothing=1.2),
             marker=dict(
-                color='#3B82F6',
-                size=9,
-                line=dict(color='#1D4ED8', width=2.5)
+                color='#0A0E1A',
+                size=8,
+                line=dict(color='#3B82F6', width=2.5),
+                symbol='circle',
             ),
-            fillcolor='rgba(59, 130, 246, 0)',
-            fillgradient=dict(
-                type='vertical',
-                colorscale=[
-                    [0, 'rgba(59, 130, 246, 0)'],
-                    [0.5, 'rgba(59, 130, 246, 0.15)'],
-                    [1, 'rgba(59, 130, 246, 0.3)']
-                ]
-            ),
-            hovertemplate='<b>%{x|%b %d, %Y}</b><br>Alerts: <b>%{y:,}</b><extra></extra>'
+            hovertemplate='<b>%{x|%b %d}</b> &nbsp; %{y:,} alerts<extra></extra>',
+            showlegend=False,
         ))
-        
+
         fig_line.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(17, 24, 39, 0.4)',
-            margin=dict(l=10, r=10, t=30, b=40),
-            height=420,
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=10, r=10, t=10, b=40),
+            height=400,
             xaxis=dict(
                 showgrid=False,
-                color='#94A3B8',
-                tickfont=dict(size=12, family='Inter', weight=600)
+                showline=False,
+                color='#475569',
+                tickfont=dict(size=11, family='DM Sans'),
+                tickformat='%b %d',
             ),
             yaxis=dict(
                 showgrid=True,
-                gridcolor='rgba(148, 163, 184, 0.06)',
-                color='#94A3B8',
-                tickfont=dict(size=12, family='Inter', weight=600),
-                zeroline=False
+                gridcolor='rgba(148,163,184,0.06)',
+                gridwidth=1,
+                color='#475569',
+                tickfont=dict(size=11, family='DM Sans'),
+                zeroline=False,
+                showline=False,
             ),
-            font=dict(family='Inter', color='#CBD5E1'),
+            font=dict(family='DM Sans', color='#CBD5E1'),
             hovermode='x unified',
             hoverlabel=dict(
-                bgcolor='rgba(17, 24, 39, 0.98)',
-                font=dict(family='Inter', size=13, color='#F1F5F9'),
-                bordercolor='rgba(59, 130, 246, 0.4)'
-            )
+                bgcolor='#0F1825',
+                font=dict(family='DM Sans', size=13, color='#F1F5F9'),
+                bordercolor='rgba(59,130,246,0.35)',
+                namelength=0,
+            ),
         )
-        
-        st.plotly_chart(fig_line, use_container_width=True)
 
-st.markdown("---")
+        st.plotly_chart(fig_line, use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 # ========== OVERRIDE INSIGHTS ==========
-st.markdown("### Policy Override Analysis")
+st.markdown('<div class="section-heading">Policy Override Analysis</div>', unsafe_allow_html=True)
 
 override_df = df[df["policy_override_applied"] == 1]
 
 if not override_df.empty:
-    oc1, oc2 = st.columns([1, 2.5])
-    
+    oc1, oc2 = st.columns([1, 3])
+
     with oc1:
-        st.metric(
-            "Overrides",
-            f"{len(override_df):,}",
-            delta=f"{len(override_df)/len(df)*100:.1f}%"
-        )
-    
+        st.markdown(f"""
+        <div class="kpi-card kpi-purple" style="height:auto;padding:2rem 1.5rem;">
+            <div class="kpi-label">Total Overrides</div>
+            <div class="kpi-value">{len(override_df):,}</div>
+            <div class="kpi-delta">{len(override_df)/len(df)*100:.1f}% of all transactions</div>
+            <div class="kpi-glow"></div>
+        </div>
+        """, unsafe_allow_html=True)
+
     with oc2:
         all_reasons = []
         for reasons in override_df["policy_reasons"]:
             all_reasons.extend(reasons)
-        
+
         if all_reasons:
-            top_reasons = pd.Series(all_reasons).value_counts().head(4)
-            
-            st.markdown("**Top Triggers:**")
+            top_reasons = pd.Series(all_reasons).value_counts().head(5)
+            max_count = top_reasons.iloc[0]
+
+            st.markdown('<div class="chart-card" style="padding:1.5rem 2rem;">', unsafe_allow_html=True)
+            st.markdown('<div class="chart-title" style="margin-bottom:1.25rem;">Top Override Triggers</div>', unsafe_allow_html=True)
+
             for reason, count in top_reasons.items():
                 pct = count / len(override_df) * 100
+                bar_width = count / max_count * 100
                 st.markdown(f"""
-                <div style="display:flex;align-items:center;margin:0.875rem 0;gap:1rem;">
-                    <span class="badge badge-high">{count}</span>
-                    <span style="color:#E2E8F0;font-size:0.9375rem;font-weight:600;">{reason}</span>
-                    <span style="color:#64748B;font-size:0.8125rem;font-weight:600;">({pct:.1f}%)</span>
+                <div class="override-row">
+                    <div class="override-label">{reason}</div>
+                    <div class="override-bar-wrap">
+                        <div class="override-bar" style="width:{bar_width:.1f}%"></div>
+                    </div>
+                    <div class="override-stat">
+                        <span class="override-count">{count:,}</span>
+                        <span class="override-pct">{pct:.1f}%</span>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-else:
-    st.info("No overrides detected")
 
-st.markdown("---")
+            st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("No policy overrides detected in current dataset.")
+
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 # ========== TABLE ==========
-st.markdown("### Recent Transactions")
+st.markdown('<div class="section-heading">Recent Transactions</div>', unsafe_allow_html=True)
 
 table_df = df[[
     "id", "created_at", "ml_probability", "ml_risk_level",
@@ -265,22 +285,25 @@ table_df["ml_probability"] = table_df["ml_probability"].round(4)
 st.dataframe(
     table_df,
     use_container_width=True,
-    height=520,
+    height=500,
     column_config={
-        "id": st.column_config.NumberColumn("ID", width="small"),
-        "created_at": st.column_config.TextColumn("Timestamp", width="medium"),
-        "ml_probability": st.column_config.NumberColumn("ML Prob", format="%.4f", width="small"),
-        "ml_risk_level": st.column_config.TextColumn("ML Risk", width="small"),
-        "final_risk_level": st.column_config.TextColumn("Final Risk", width="small"),
-        "final_risk_score": st.column_config.NumberColumn("Score", width="small"),
-        "policy_override_applied": st.column_config.CheckboxColumn("Override", width="small")
+        "id":                       st.column_config.NumberColumn("ID",        width="small"),
+        "created_at":               st.column_config.TextColumn("Timestamp",   width="medium"),
+        "ml_probability":           st.column_config.NumberColumn("ML Prob",   format="%.4f", width="small"),
+        "ml_risk_level":            st.column_config.TextColumn("ML Risk",     width="small"),
+        "final_risk_level":         st.column_config.TextColumn("Final Risk",  width="small"),
+        "final_risk_score":         st.column_config.NumberColumn("Score",     width="small"),
+        "policy_override_applied":  st.column_config.CheckboxColumn("Override",width="small"),
     },
-    hide_index=True
+    hide_index=True,
 )
 
 # ========== FOOTER ==========
-st.markdown("---")
-st.markdown(
-    '<p class="caption" style="text-align:center;font-weight:600;">Fraud Intelligence Platform • Built with ML + Python + Streamlit</p>',
-    unsafe_allow_html=True
-)
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+st.markdown("""
+<div class="footer">
+    <span class="footer-dot"></span>
+    Fraud Intelligence Platform &nbsp;·&nbsp; ML + Python + Streamlit
+    <span class="footer-dot"></span>
+</div>
+""", unsafe_allow_html=True)
