@@ -27,12 +27,12 @@ DB_PATH = get_db_path(PROJECT_ROOT)
 total_count = get_total_count(DB_PATH)
 df = load_logs_df(DB_PATH, limit=10000)
 
-# ========== HEADER (Enhanced) ==========
+# ========== HEADER (Final Enhanced) ==========
 col_h1, col_h2 = st.columns([3, 1])
 
 with col_h1:
     st.markdown("# Transaction Fraud Intelligence")
-    st.markdown('<p class="subtitle">Real-time Risk Monitoring & Policy Engine</p>', 
+    st.markdown('<p class="subtitle">Real-time Fraud Monitoring & Risk Intelligence Platform</p>', 
                 unsafe_allow_html=True)
 
 with col_h2:
@@ -80,7 +80,7 @@ with c4:
     st.metric(
         label="Policy Overrides",
         value=f"{override_rate:.1f}%",
-        delta=f"{int(df['policy_override_applied'].sum()):,} cases"
+        delta=f"{int(df['policy_override_applied'].sum()):,} triggers"
     )
 
 with c5:
@@ -95,18 +95,24 @@ st.markdown("---")
 # ========== CHARTS ROW ==========
 chart_left, chart_right = st.columns([1, 1])
 
-# ---- RISK DISTRIBUTION (Premium Donut) ----
+# ---- RISK DISTRIBUTION (Softer Colors) ----
 with chart_left:
     st.markdown("### Risk Distribution")
     
     dist_data = df["final_risk_level"].value_counts()
     
+    # ✅ Softer color palette
     fig_donut = go.Figure(data=[go.Pie(
         labels=dist_data.index,
         values=dist_data.values,
-        hole=0.65,
+        hole=0.68,
         marker=dict(
-            colors=['#86EFAC', '#FCD34D', '#FDBA74', '#FCA5A5'],
+            colors=[
+                '#86EFAC',  # Low (soft green)
+                '#FCD34D',  # Medium (soft yellow)
+                '#FDBA74',  # High (soft orange)
+                '#F87171'   # Critical (softer red, not too strong)
+            ],
             line=dict(color='#0B1220', width=3)
         ),
         textfont=dict(size=13, color='white', family='Inter', weight=600),
@@ -121,23 +127,23 @@ with chart_left:
             y=-0.2,
             xanchor="center",
             x=0.5,
-            font=dict(size=12, color='#CBD5E1', family='Inter')
+            font=dict(size=12, color='#CBD5E1', family='Inter', weight=500)
         ),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=40, b=80),
-        height=380,
+        height=400,
         annotations=[dict(
-            text=f'<b>{total_count:,}</b><br><span style="font-size:11px;color:#94A3B8;font-weight:500">TOTAL</span>',
+            text=f'<b>{total_count:,}</b><br><span style="font-size:11px;color:#94A3B8;font-weight:600">TOTAL</span>',
             x=0.5, y=0.5,
-            font=dict(size=32, color='#F8FAFC', family='Inter'),
+            font=dict(size=34, color='#F8FAFC', family='Inter'),
             showarrow=False
         )]
     )
     
     st.plotly_chart(fig_donut, use_container_width=True)
 
-# ---- ALERTS TREND (Enhanced Smooth Line) ----
+# ---- ALERTS TREND (Blue + Enhanced) ----
 with chart_right:
     st.markdown("### Alert Trend (Last 14 Days)")
     
@@ -153,48 +159,57 @@ with chart_right:
         
         fig_line = go.Figure()
         
-        # ✅ ENHANCED: Smooth spline + gradient fill
+        # ✅ BLUE (trust color) + Enhanced gradient
         fig_line.add_trace(go.Scatter(
             x=alerts_by_date["date"],
             y=alerts_by_date["count"],
-            mode='lines',
+            mode='lines+markers',
             fill='tozeroy',
             line=dict(
-                color='#EF4444',
-                width=3,
-                shape='spline',  # ✅ Smooth curve
-                smoothing=1.2
+                color='#3B82F6',  # ✅ Blue instead of red
+                width=4,
+                shape='spline',
+                smoothing=1.3
             ),
-            fillcolor='rgba(239, 68, 68, 0.2)',  # ✅ Gradient fill
+            marker=dict(
+                color='#3B82F6',
+                size=8,
+                line=dict(color='#1D4ED8', width=2)
+            ),
+            fillcolor='rgba(59, 130, 246, 0.25)',  # ✅ Blue gradient fill
             fillgradient=dict(
                 type='vertical',
-                colorscale=[[0, 'rgba(239, 68, 68, 0)'], [1, 'rgba(239, 68, 68, 0.25)']]
+                colorscale=[
+                    [0, 'rgba(59, 130, 246, 0)'],
+                    [1, 'rgba(59, 130, 246, 0.35)']
+                ]
             ),
             hovertemplate='<b>%{x|%b %d}</b><br>Alerts: %{y:,}<extra></extra>'
         ))
         
         fig_line.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(30, 41, 59, 0.25)',
+            plot_bgcolor='rgba(30, 41, 59, 0.3)',
             margin=dict(l=20, r=20, t=40, b=40),
-            height=380,
+            height=400,
             xaxis=dict(
-                showgrid=False,  # ✅ Clean x-axis
+                showgrid=False,  # ✅ No x-grid
                 color='#94A3B8',
                 tickfont=dict(size=11, family='Inter', weight=500)
             ),
             yaxis=dict(
                 showgrid=True,
-                gridcolor='rgba(148, 163, 184, 0.06)',  # ✅ Subtle grid
+                gridcolor='rgba(148, 163, 184, 0.08)',  # ✅ Subtle grid
                 color='#94A3B8',
-                tickfont=dict(size=11, family='Inter', weight=500)
+                tickfont=dict(size=11, family='Inter', weight=500),
+                zeroline=False
             ),
             font=dict(family='Inter', color='#CBD5E1'),
             hovermode='x unified',
             hoverlabel=dict(
-                bgcolor='rgba(30, 41, 59, 0.95)',
+                bgcolor='rgba(30, 41, 59, 0.98)',
                 font=dict(family='Inter', size=12, color='white'),
-                bordercolor='rgba(148, 163, 184, 0.2)'
+                bordercolor='rgba(59, 130, 246, 0.3)'
             )
         )
         
@@ -229,7 +244,7 @@ if not override_df.empty:
             for reason, count in top_reasons.items():
                 pct = count / len(override_df) * 100
                 st.markdown(f"""
-                <div style="display:flex;align-items:center;margin:0.75rem 0;gap:0.75rem;">
+                <div style="display:flex;align-items:center;margin:0.75rem 0;gap:0.85rem;">
                     <span class="badge badge-high">{count}</span>
                     <span style="color:#E2E8F0;font-size:0.875rem;font-weight:500;">{reason}</span>
                     <span style="color:#64748B;font-size:0.75rem;font-weight:500;">({pct:.1f}%)</span>
