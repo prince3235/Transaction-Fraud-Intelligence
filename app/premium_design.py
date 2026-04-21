@@ -334,6 +334,180 @@ def inject_premium_design():
     [data-testid="stStatusWidget"]      { visibility: hidden !important; }
 
     /* ════════════════════════════════════════════
+       SIDEBAR — blend with dashboard
+    ════════════════════════════════════════════ */
+    [data-testid="stSidebar"] {
+        background: #05080F !important;
+        border-right: 1px solid rgba(0,180,255,0.09) !important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child {
+        background: #05080F !important;
+        padding: 1.25rem 1.25rem 2rem !important;
+    }
+
+    /* All sidebar text muted blue */
+    [data-testid="stSidebar"] label p,
+    [data-testid="stSidebar"] .stMarkdown p {
+        color: #5A8AA8 !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.10em !important;
+    }
+
+    /* Slider track */
+    [data-testid="stSidebar"] [data-baseweb="slider"] [role="slider"] {
+        background: #00B4FF !important;
+        border: 2px solid #05080F !important;
+        box-shadow: 0 0 8px rgba(0,180,255,0.45) !important;
+    }
+
+    /* Slider value label (₹5000) */
+    [data-testid="stSidebar"] [data-testid="stSlider"] span {
+        color: #00B4FF !important;
+        font-size: 12px !important;
+        font-weight: 700 !important;
+        background: rgba(0,180,255,0.10) !important;
+        border: 1px solid rgba(0,180,255,0.22) !important;
+        border-radius: 6px !important;
+        padding: 2px 8px !important;
+    }
+
+    /* Selectbox container */
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background: rgba(8,13,26,0.95) !important;
+        border: 1px solid rgba(148,163,184,0.12) !important;
+        border-radius: 8px !important;
+        color: #8899AA !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] > div:hover {
+        border-color: rgba(0,180,255,0.28) !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] span {
+        color: #8899AA !important;
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        text-transform: none !important;
+        letter-spacing: 0 !important;
+    }
+
+    /* Dropdown list */
+    [data-baseweb="popover"] [data-baseweb="menu"] {
+        background: #0D1220 !important;
+        border: 1px solid rgba(148,163,184,0.12) !important;
+        border-radius: 8px !important;
+    }
+
+    [data-baseweb="popover"] [role="option"] {
+        background: transparent !important;
+        color: #6B8099 !important;
+        font-size: 13px !important;
+    }
+
+    [data-baseweb="popover"] [role="option"]:hover,
+    [data-baseweb="popover"] [aria-selected="true"] {
+        background: rgba(0,180,255,0.09) !important;
+        color: #C4CFDE !important;
+    }
+
+    /* Checkbox */
+    [data-testid="stSidebar"] [data-testid="stCheckbox"] span[data-testid="stCheckbox"] {
+        background: rgba(8,13,26,0.95) !important;
+        border-color: rgba(148,163,184,0.14) !important;
+        border-radius: 4px !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stCheckbox"] label p {
+        font-size: 12px !important;
+        letter-spacing: 0.02em !important;
+        text-transform: none !important;
+        color: #5A8AA8 !important;
+    }
+
+    /* Sidebar HR divider */
+    [data-testid="stSidebar"] hr {
+        display: block !important;
+        height: 1px !important;
+        background: linear-gradient(90deg, transparent, rgba(0,180,255,0.10), transparent) !important;
+        border: none !important;
+        margin: 1rem 0 !important;
+    }
+
+    /* Primary inject button */
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg,
+            rgba(0,180,255,0.18) 0%,
+            rgba(168,85,247,0.18) 100%) !important;
+        color: #E8F0FF !important;
+        border: 1px solid rgba(0,180,255,0.32) !important;
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+        font-size: 13px !important;
+        letter-spacing: 0.03em !important;
+        box-shadow: 0 4px 20px rgba(0,180,255,0.10) !important;
+        transition: all 0.25s ease !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg,
+            rgba(0,180,255,0.28) 0%,
+            rgba(168,85,247,0.26) 100%) !important;
+        border-color: rgba(0,180,255,0.52) !important;
+        box-shadow: 0 6px 28px rgba(0,180,255,0.20) !important;
+        transform: translateY(-2px) !important;
+    }
+
+    /* Secondary sidebar buttons */
+    [data-testid="stSidebar"] .stButton > button:not([kind="primary"]) {
+        background: rgba(8,13,26,0.80) !important;
+        color: #5A8AA8 !important;
+        border: 1px solid rgba(148,163,184,0.11) !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        font-size: 12px !important;
+        padding: 0.6rem 1rem !important;
+    }
+
+    [data-testid="stSidebar"] .stButton > button:not([kind="primary"]):hover {
+        border-color: rgba(255,45,85,0.28) !important;
+        color: #FF8A8A !important;
+        background: rgba(255,45,85,0.06) !important;
+    }
+
+    /* Sidebar nav links */
+    [data-testid="stSidebarNavLink"] {
+        color: #2E4A60 !important;
+        border-radius: 8px !important;
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    [data-testid="stSidebarNavLink"]:hover {
+        background: rgba(0,180,255,0.07) !important;
+        color: #6B8099 !important;
+    }
+
+    [data-testid="stSidebarNavLink"][aria-current="page"] {
+        background: rgba(0,180,255,0.10) !important;
+        color: #60C8FF !important;
+        border-left: 2px solid #00B4FF !important;
+    }
+
+    /* Collapse toggle button */
+    [data-testid="stSidebarCollapsedControl"] {
+        background: #05080F !important;
+        border-right: 1px solid rgba(0,180,255,0.09) !important;
+    }
+
+    [data-testid="stSidebarCollapsedControl"] svg {
+        color: #2E4A60 !important;
+    }
+
+    /* ════════════════════════════════════════════
        SCROLLBAR
     ════════════════════════════════════════════ */
     ::-webkit-scrollbar       { width: 5px; height: 5px; }
