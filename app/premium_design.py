@@ -223,6 +223,11 @@ def inject_premium_design():
         border: 1px solid rgba(148,163,184,0.09);
         border-radius: 16px;
         padding: 22px 20px 10px;
+        transition: border-color 0.3s ease;
+    }
+
+    .chart-card:hover {
+        border-color: rgba(0,180,255,0.16);
     }
 
     .chart-card-title {
@@ -365,13 +370,19 @@ def inject_premium_design():
 
     /* Slider value label (₹5000) */
     [data-testid="stSidebar"] [data-testid="stSlider"] span {
-        color: #00B4FF !important;
+        color: #60C8FF !important;
         font-size: 12px !important;
         font-weight: 700 !important;
         background: rgba(0,180,255,0.10) !important;
         border: 1px solid rgba(0,180,255,0.22) !important;
         border-radius: 6px !important;
         padding: 2px 8px !important;
+    }
+
+    /* Slider min/max range labels */
+    [data-testid="stSidebar"] [data-testid="stSlider"] > div > div > div > div {
+        color: #2E4A60 !important;
+        font-size: 10px !important;
     }
 
     /* Selectbox container */
