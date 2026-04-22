@@ -80,11 +80,8 @@ with st.sidebar:
     suspicious_signals = st.slider("Suspicious Signals", 0, 5, value=0,
                                    help="Number of risk flags triggered (velocity, pattern, etc.)")
 
-    col_flags1, col_flags2 = st.columns(2)
-    with col_flags1:
-        is_new_device = st.checkbox("New Device", value=False)
-    with col_flags2:
-        velocity_flag = st.checkbox("High Velocity", value=False)
+    is_new_device = st.checkbox("🖥️  New Device", value=False)
+    velocity_flag = st.checkbox("⚡  High Velocity", value=False)
 
     # ── Live Risk Score Preview ─────────────────────────────────────────────
     live_prob = compute_ml_probability(
@@ -374,9 +371,15 @@ with chart_left:
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=10, r=10, t=10, b=100), height=380,
         annotations=[dict(
-            text=f"<b>{donut_total:,}</b><br>TOTAL",
+            text=(
+                f'<span style="font-size:34px;font-weight:800;'
+                f'font-family:DM Sans;color:#F0F4FF;">{donut_total:,}</span>'
+                f'<br>'
+                f'<span style="font-size:10px;font-weight:700;'
+                f'letter-spacing:0.14em;color:#2E4A60;">TOTAL</span>'
+            ),
             x=0.5, y=0.5, showarrow=False, align="center",
-            font=dict(family="DM Sans", size=30, color="#F0F4FF"),
+            font=dict(family="DM Sans", color="#F0F4FF"),
         )],
     )
     st.plotly_chart(fig_donut, use_container_width=True, config={"displayModeBar": False})
@@ -441,7 +444,8 @@ with chart_right:
                        color="#2E4258", tickfont=dict(size=11, family="DM Sans")),
             yaxis=dict(showgrid=True, gridcolor="rgba(148,163,184,0.05)",
                        zeroline=False, showline=False,
-                       color="#2E4258", tickfont=dict(size=11, family="DM Sans")),
+                       color="#2E4258", tickfont=dict(size=11, family="DM Sans"),
+                       tickformat="d"),
             font=dict(family="DM Sans", color="#8899AA"),
             hovermode="x unified",
             hoverlabel=dict(bgcolor="#0A1020", bordercolor="rgba(0,180,255,0.3)",
