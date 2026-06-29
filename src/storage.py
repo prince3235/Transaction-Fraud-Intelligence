@@ -41,6 +41,12 @@ def init_db(db_path: Path) -> None:
         """
     )
 
+    cur.execute("PRAGMA table_info(prediction_logs)")
+    columns = [col[1] for col in cur.fetchall()]
+    if "status" not in columns:
+        cur.execute("ALTER TABLE prediction_logs ADD COLUMN status TEXT NOT NULL DEFAULT 'APPROVED'")
+        cur.execute("UPDATE prediction_logs SET status = 'PENDING_REVIEW' WHERE final_risk_level IN ('MEDIUM', 'HIGH', 'CRITICAL')")
+
     con.commit()
     con.close()
 
@@ -58,6 +64,7 @@ def log_prediction(
     policy_reasons: List[str],
     suspicious_signal_count: Optional[int] = None,
     alert: Optional[Dict[str, Any]] = None,
+    status: Optional[str] = None,
 ) -> None:
     con = connect(db_path)
     cur = con.cursor()
@@ -69,8 +76,8 @@ def log_prediction(
             ml_probability, ml_risk_level, ml_risk_score,
             final_risk_level, final_risk_score,
             policy_override_applied, policy_reasons_json,
-            suspicious_signal_count, alert_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            suspicious_signal_count, alert_json, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             created_at,
@@ -84,6 +91,7 @@ def log_prediction(
             json.dumps(policy_reasons),
             int(suspicious_signal_count) if suspicious_signal_count is not None else None,
             json.dumps(alert) if alert is not None else None,
+            status if status is not None else ("APPROVED" if final_risk_level == "LOW" else "PENDING_REVIEW"),
         ),
     )
 
@@ -101,7 +109,7 @@ def fetch_recent_logs(db_path: Path, limit: int = 50) -> List[Dict[str, Any]]:
                ml_probability, ml_risk_level, ml_risk_score,
                final_risk_level, final_risk_score,
                policy_override_applied, policy_reasons_json,
-               suspicious_signal_count, alert_json
+               suspicious_signal_count, alert_json, status
         FROM prediction_logs
         ORDER BY id DESC
         LIMIT ?
@@ -128,6 +136,7 @@ def fetch_recent_logs(db_path: Path, limit: int = 50) -> List[Dict[str, Any]]:
                 "policy_reasons": json.loads(r[9]),
                 "suspicious_signal_count": r[10],
                 "alert": json.loads(r[11]) if r[11] else None,
+                "status": r[12],
             }
         )
     return out
