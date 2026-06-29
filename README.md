@@ -83,6 +83,8 @@ Rule 5: Velocity flag + new device                 →  HIGH override
 
 ### 🎨 Premium Streamlit Dashboard
 - **Live Transaction Simulator** — inject single or batch transactions, charts update instantly
+- **Compliance Operations Console** — Review queue, take action (Approve/Block), SHAP approximations
+- **Model Health & MLOps** — Track drift and trigger retraining loops
 - **Session State architecture** — no page reload required
 - **5 KPI cards** — total transactions, critical alerts, high risk, override rate, avg score
 - **Risk distribution donut** — always shows full dataset, unaffected by filters
@@ -315,10 +317,10 @@ curl -X POST "http://localhost:8000/predict" \
 - [x] Premium Streamlit dashboard
 - [x] Live transaction simulator
 - [x] SHAP explainability
-- [ ] Email/Slack alerts on CRITICAL detection
-- [ ] Docker containerization
+- [x] Email/Slack alerts on CRITICAL detection
+- [x] Docker containerization
 - [ ] Real-time streaming (Kafka integration)
-- [ ] Model retraining pipeline
+- [x] Model retraining pipeline
 
 ---
 
