@@ -163,30 +163,70 @@ with col_detail:
             
     st.markdown("---")
     
-    st.markdown('<div class="section-label">Fraud Indicators (SHAP Approx)</div>', unsafe_allow_html=True)
-    # Fake SHAP for demo: highlight high amount, balance discrepancies
-    tx = row["transaction"] if isinstance(row["transaction"], dict) else json.loads(row["transaction"]) if isinstance(row["transaction"], str) else {}
+    st.markdown('<div class="section-label">Explainable AI (Feature Contributions)</div>', unsafe_allow_html=True)
     
-    features_html = ""
-    for k, v in tx.items():
-        if k in ["step", "isFraud", "isFlaggedFraud", "nameOrig", "nameDest"]: continue
+    # Process features for XAI
+    tx = row["transaction"] if isinstance(row["transaction"], dict) else json.loads(row["transaction"]) if isinstance(row["transaction"], str) else {}
+    try:
+        from src.features import build_features, load_feature_config
+        from src.xai import explain_prediction
+        import plotly.graph_objects as go
         
-        # Color hack for demo
-        val_str = str(v)
-        color = "#8899AA"
-        if isinstance(v, (int, float)):
-            if k == "amount" and v > 50000: color = "#FF8A00"
-            if k.startswith("old") or k.startswith("new"): val_str = f"₹{v:,.2f}"
-            if k == "amount": val_str = f"₹{v:,.2f}"
+        config = load_feature_config()
+        features_df = build_features(tx, config)
+        xai_res = explain_prediction(PROJECT_ROOT, features_df)
+        
+        if "error" in xai_res:
+            st.warning("XAI Model not loaded or unavailable.")
+        else:
+            conf_val = xai_res["confidence"] * 100
+            conf_color = "#00E676" if conf_val > 70 else "#FF8A00" if conf_val > 40 else "#FF2D55"
             
-        features_html += f"""
-        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(148,163,184,0.05);">
-            <span style="font-size:12px;color:#5A8AA8;">{k}</span>
-            <span style="font-size:13px;font-family:DM Mono,monospace;font-weight:600;color:{color};">{val_str}</span>
-        </div>
-        """
-        
-    st.markdown(f'<div style="background:rgba(8,13,26,0.5);border:1px solid rgba(148,163,184,0.1);padding:15px;border-radius:10px;">{features_html}</div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="margin-bottom:15px;display:flex;align-items:center;gap:10px;">
+                <span style="font-size:12px;color:#8899AA;text-transform:uppercase;">Model Confidence</span>
+                <span style="font-size:16px;font-weight:700;color:{conf_color};">{conf_val:.1f}%</span>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            contributors = xai_res["contributors"]
+            
+            if contributors:
+                # Build waterfall-like horizontal bar chart
+                fig = go.Figure()
+                
+                # Sort by contribution value for better visualization
+                contributors.sort(key=lambda x: x["contribution"])
+                
+                y_labels = [c["feature"] for c in contributors]
+                x_vals = [c["contribution"] for c in contributors]
+                colors = ["#FF2D55" if c > 0 else "#00B4FF" for c in x_vals]
+                
+                fig.add_trace(go.Bar(
+                    x=x_vals,
+                    y=y_labels,
+                    orientation='h',
+                    marker_color=colors,
+                    text=[f"{c:.3f}" for c in x_vals],
+                    textposition='outside',
+                ))
+                
+                fig.update_layout(
+                    height=max(250, len(contributors) * 30),
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#8899AA", family="DM Sans"),
+                    xaxis=dict(title="Contribution to Fraud Probability", gridcolor="rgba(255,255,255,0.05)", zerolinecolor="rgba(255,255,255,0.2)"),
+                    yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.info("No significant features to display.")
+    except Exception as e:
+        st.error(f"Error generating XAI explanation: {e}")
     
     if row["policy_override_applied"]:
         st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)

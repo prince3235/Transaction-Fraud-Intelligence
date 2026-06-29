@@ -131,23 +131,53 @@ with c2:
     """, unsafe_allow_html=True)
     
     if st.button("🚀 Trigger Model Retraining Pipeline", type="primary", use_container_width=True):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        status_text.text("Fetching latest labeled logs from database...")
-        time.sleep(1)
-        progress_bar.progress(25)
-        
-        status_text.text("Engineering features for new data...")
-        time.sleep(1.5)
-        progress_bar.progress(50)
-        
-        status_text.text("Training RandomForestClassifier (n_estimators=100)...")
-        time.sleep(2)
-        progress_bar.progress(75)
-        
-        status_text.text("Evaluating model performance on holdout set...")
-        time.sleep(1)
-        progress_bar.progress(100)
-        
-        st.success("✅ Model retraining complete! New ROC-AUC: 0.9987. Saved as best_fraud_model_v2.pkl")
+        if not __import__("src.auth", fromlist=["has_permission"]).has_permission(st.session_state.user["role"], "retrain_model"):
+            st.error("Access Denied: Requires 'retrain_model' permission.")
+        else:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            status_text.text("Fetching latest labeled logs from database...")
+            time.sleep(1)
+            progress_bar.progress(25)
+            
+            status_text.text("Engineering features for new data...")
+            time.sleep(1.5)
+            progress_bar.progress(50)
+            
+            status_text.text("Training RandomForestClassifier (n_estimators=100)...")
+            time.sleep(2)
+            progress_bar.progress(75)
+            
+            status_text.text("Evaluating model performance on holdout set...")
+            time.sleep(1)
+            progress_bar.progress(100)
+            
+            # Register in Model Registry
+            from src.model_registry import register_model
+            from src.auth import log_audit_event
+            
+            # Use current displayed stats as the new model's stats (for simulation)
+            new_model = register_model(
+                db_path=get_db_path(PROJECT_ROOT),
+                pkl_path=str(PROJECT_ROOT / "models" / "best_fraud_model.pkl"),
+                roc_auc=roc,
+                pr_auc=pr,
+                precision_val=prec,
+                recall_val=rec,
+                f1_val=f1,
+                n_estimators=100,
+                dataset_size=9600 + 500, # Mock increase
+                feature_count=29,
+                notes="Retrained from Model Health dashboard.",
+            )
+            
+            log_audit_event(
+                get_db_path(PROJECT_ROOT), 
+                st.session_state.user["username"], 
+                "Model Retrained", 
+                "model_registry", 
+                new_model["version"]
+            )
+            
+            st.success(f"✅ Model retraining complete! Saved as {new_model['version']}. Go to Model Registry to promote it.")
