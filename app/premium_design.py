@@ -216,6 +216,39 @@ def inject_premium_design():
     }
 
     /* ════════════════════════════════════════════
+       STATUS BADGES
+    ════════════════════════════════════════════ */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        border-radius: 6px;
+    }
+
+    .status-approved {
+        background: rgba(0,229,160,0.12);
+        color: #00E5A0;
+        border: 1px solid rgba(0,229,160,0.25);
+    }
+
+    .status-pending {
+        background: rgba(255,138,0,0.12);
+        color: #FF8A00;
+        border: 1px solid rgba(255,138,0,0.25);
+    }
+
+    .status-blocked {
+        background: rgba(255,45,85,0.12);
+        color: #FF2D55;
+        border: 1px solid rgba(255,45,85,0.25);
+    }
+
+    /* ════════════════════════════════════════════
        CHART CARDS
     ════════════════════════════════════════════ */
     .chart-card {
