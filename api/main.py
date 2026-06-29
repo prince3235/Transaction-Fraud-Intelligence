@@ -165,73 +165,6 @@ def debug_predict(tx: TransactionIn):
 def recent_logs(limit: int = 50):
     return {"limit": limit, "items": fetch_recent_logs(DB_PATH, limit=limit)}
 
-@app.post("/admin/seed-logs")
-def seed_logs(count: int = 500):
-    import pandas as pd
-    import json
-
-    X_TEST_PATH = BASE_DIR / "data" / "processed" / "X_test.csv"
-    X_test = pd.read_csv(X_TEST_PATH)
-
-    sample_df = X_test.sample(n=min(count, len(X_test)), random_state=42)
-    sample_df = sample_df[model_columns]
-
-    ml_probs = model.predict_proba(sample_df)[:, 1]
-    created_at = datetime.now(timezone.utc).isoformat()
-
-    rows = []
-    for i, (_, row) in enumerate(sample_df.iterrows()):
-        ml_prob = float(ml_probs[i])
-        base_risk = score_probability(ml_prob)
-
-        features_dict = row.to_dict()
-        policy_out = apply_policy_overrides(base_risk, features_dict)
-
-        if isinstance(policy_out, tuple):
-            final_risk, policy_reasons = policy_out
-        else:
-            final_risk, policy_reasons = policy_out, []
-
-        alert = None
-        if should_alert(final_risk.risk_level, min_level="MEDIUM"):
-            alert_obj = create_alert(
-                transaction_ref=f"seed_{i}",
-                probability=final_risk.probability,
-                risk_score=final_risk.risk_score,
-                risk_level=final_risk.risk_level,
-                recommended_action=final_risk.recommended_action,
-                reasons=[{"reason": r} for r in policy_reasons],
-            )
-            alert = alert_obj.__dict__
-
-        tx = {k: float(v) if isinstance(v, (float, int)) else str(v) for k, v in features_dict.items() if k in ["step","amount","oldbalanceOrg","newbalanceOrig","oldbalanceDest","newbalanceDest"]}
-
-        rows.append((
-            created_at, json.dumps(tx),
-            float(ml_prob), str(base_risk.risk_level), int(base_risk.risk_score),
-            str(final_risk.risk_level), int(final_risk.risk_score),
-            1 if (final_risk.risk_level != base_risk.risk_level) else 0,
-            json.dumps(policy_reasons),
-            int(features_dict.get("suspicious_signal_count", 0)),
-            json.dumps(alert) if alert else None
-        ))
-
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cur = con.cursor()
-    cur.executemany(
-        """INSERT INTO prediction_logs (
-            created_at, transaction_json,
-            ml_probability, ml_risk_level, ml_risk_score,
-            final_risk_level, final_risk_score,
-            policy_override_applied, policy_reasons_json,
-            suspicious_signal_count, alert_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        rows
-    )
-    con.commit()
-    con.close()
-
-    return {"status": "ok", "inserted": len(rows)}    
 
 @app.post("/admin/seed-logs")
 def seed_logs(count: int = 1000):
@@ -287,7 +220,8 @@ def seed_logs(count: int = 1000):
             1 if (final_risk.risk_level != base_risk.risk_level) else 0,
             json.dumps(policy_reasons),
             int(features_dict.get("suspicious_signal_count", 0)),
-            json.dumps(alert) if alert else None
+            json.dumps(alert) if alert else None,
+            "APPROVED" if final_risk.risk_level == "LOW" else "PENDING_REVIEW"
         ))
 
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -298,8 +232,8 @@ def seed_logs(count: int = 1000):
             ml_probability, ml_risk_level, ml_risk_score,
             final_risk_level, final_risk_score,
             policy_override_applied, policy_reasons_json,
-            suspicious_signal_count, alert_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            suspicious_signal_count, alert_json, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows
     )
     con.commit()
@@ -307,6 +241,20 @@ def seed_logs(count: int = 1000):
 
     return {"status": "ok", "inserted": len(rows)}    
 
+
+class ActionIn(BaseModel):
+    status: str
+
+@app.post("/logs/{log_id}/action")
+def log_action(log_id: int, action: ActionIn):
+    if action.status not in ("APPROVED", "BLOCKED"):
+        return {"error": "Invalid status"}
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cur = con.cursor()
+    cur.execute("UPDATE prediction_logs SET status = ? WHERE id = ?", (action.status, int(log_id)))
+    con.commit()
+    con.close()
+    return {"status": "ok", "id": log_id, "new_status": action.status}
 
 # ========== ADMIN & MONITORING ENDPOINTS ==========
 
