@@ -344,10 +344,14 @@ st.markdown('<div class="hdivider" style="margin:2.5rem 0"></div>', unsafe_allow
 # ════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-label">Recent Transactions (Database)</div>', unsafe_allow_html=True)
 
-table_df = df_db[[
+cols_to_show = [
     "id","created_at","ml_probability","ml_risk_level",
-    "final_risk_level","final_risk_score","policy_override_applied","status"
-]].head(40).copy()
+    "final_risk_level","final_risk_score","policy_override_applied"
+]
+if "status" in df_db.columns:
+    cols_to_show.append("status")
+    
+table_df = df_db[cols_to_show].head(40).copy()
 table_df["created_at"]     = table_df["created_at"].dt.strftime("%Y-%m-%d %H:%M")
 table_df["ml_probability"] = table_df["ml_probability"].round(4)
 

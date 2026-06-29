@@ -108,7 +108,10 @@ with col_queue:
     st.markdown(f'<div style="font-size:12px;color:#5A8AA8;margin-top:-10px;margin-bottom:20px;">Showing {len(f_df)} transactions</div>', unsafe_allow_html=True)
     
     # Queue preview table
-    preview_df = f_df[["id", "created_at", "final_risk_level", "final_risk_score", "status"]].head(15).copy()
+    cols = ["id", "created_at", "final_risk_level", "final_risk_score"]
+    if "status" in f_df.columns:
+        cols.append("status")
+    preview_df = f_df[cols].head(15).copy()
     preview_df["created_at"] = preview_df["created_at"].dt.strftime("%m-%d %H:%M")
     st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
