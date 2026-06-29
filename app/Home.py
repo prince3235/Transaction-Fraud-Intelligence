@@ -40,47 +40,19 @@ if "last_injected_id" not in st.session_state:
 DB_PATH = get_db_path(PROJECT_ROOT)
 
 # ════════════════════════════════════════════════════════════════════════════
-#  LOGIN GATE
+#  DASHBOARD INTRODUCTION
 # ════════════════════════════════════════════════════════════════════════════
-if "user" not in st.session_state:
-    st.session_state.user = None
+st.markdown("""
+<div style="padding:2rem 0;text-align:center;">
+  <div class="page-title">
+    Enterprise Fraud <span class="gradient-word">Intelligence</span>
+  </div>
+  <div class="page-subtitle">
+    Platform Control Center
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-if not st.session_state.user:
-    st.markdown("""
-    <div style="padding:4rem 0;text-align:center;">
-      <div class="page-title">
-        Enterprise Fraud <span class="gradient-word">Intelligence</span>
-      </div>
-      <div class="page-subtitle">
-        Secure Access Portal
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 1.2, 1])
-    with col2:
-        with st.form("login_form"):
-            st.markdown('<div class="section-label">Sign In</div>', unsafe_allow_html=True)
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Secure Login", use_container_width=True)
-            
-            if submitted:
-                user = authenticate(DB_PATH, username, password)
-                if user:
-                    st.session_state.user = user
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
-        
-        st.markdown('<div class="section-label" style="margin-top:20px;">Demo Credentials</div>', unsafe_allow_html=True)
-        for demo in DEMO_USERS:
-            if st.button(f"{demo['role']} ({demo['username']})", use_container_width=True):
-                user = authenticate(DB_PATH, demo['username'], demo['password'])
-                if user:
-                    st.session_state.user = user
-                    st.rerun()
-    st.stop()
 
 
 # ════════════════════════════════════════════════════════════════════════════

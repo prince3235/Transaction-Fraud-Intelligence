@@ -1,53 +1,32 @@
 import streamlit as st
-import sys
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.auth import get_role_info, has_permission
 
 def require_auth(permission: str = None) -> None:
     """
-    Enforce authentication and optional RBAC permission on a Streamlit page.
-    If the user is not authenticated or lacks permission, execution stops here.
+    Auto-bypassed auth guard. Automatically sets session to admin.
     """
     if "user" not in st.session_state or not st.session_state.user:
-        st.warning("Please log in to access this page.")
-        if st.button("Go to Login"):
-            st.switch_page("Home.py")
-        st.stop()
-
-    user = st.session_state.user
-    
-    if permission and not has_permission(user["role"], permission):
-        st.error(f"Access Denied. You need the '{permission}' permission.")
-        st.stop()
+        st.session_state.user = {
+            "id": 1,
+            "username": "admin",
+            "role": "admin"
+        }
+    pass
 
 def display_user_profile():
-    """Display the authenticated user's profile card in the sidebar."""
+    """Display a clean Admin badge instead of the complex profile card."""
     if "user" not in st.session_state or not st.session_state.user:
-        return
+        st.session_state.user = {"id": 1, "username": "admin", "role": "admin"}
         
-    user = st.session_state.user
-    role_info = get_role_info(user["role"])
-    
     st.sidebar.markdown(f"""
-    <div style="background:rgba(8,13,26,0.6);border:1px solid rgba(148,163,184,0.1);
-                border-radius:8px;padding:12px;margin-bottom:20px;">
-        <div style="font-size:14px;font-weight:700;color:#E8F0FF;">{user['username']}</div>
-        <div style="display:inline-block;background:{role_info['color']}18;
-                    border:1px solid {role_info['color']}44;color:{role_info['color']};
+    <div style="background:#ffffff;border:1px solid #E2E8F0;
+                border-radius:8px;padding:12px;margin-bottom:20px;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+        <div style="font-size:14px;font-weight:700;color:#0F172A;">Admin Session</div>
+        <div style="display:inline-block;background:#EFF6FF;
+                    border:1px solid #BFDBFE;color:#2563EB;
                     font-size:10px;font-weight:700;letter-spacing:0.05em;
                     padding:2px 8px;border-radius:100px;margin-top:4px;">
-            {role_info['icon']} {role_info['label']}
+            🛡️ FULL ACCESS
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    if st.sidebar.button("Logout", use_container_width=True):
-        import time
-        st.session_state.user = None
-        st.sidebar.success("Logged out")
-        time.sleep(0.5)
-        st.switch_page("Home.py")
