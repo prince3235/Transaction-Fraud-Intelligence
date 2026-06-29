@@ -10,14 +10,21 @@ import time
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.utils_dashboard import get_db_path, load_logs_df
 from app.premium_design import inject_premium_design
-from sklearn.metrics import (
-    roc_auc_score, average_precision_score,
-    confusion_matrix, precision_score, recall_score, f1_score
-)
+from app.auth_guard import require_auth, display_user_profile
 
+# ════════════════════════════════════════════════════════════════════════════
+#  PAGE CONFIG
+# ════════════════════════════════════════════════════════════════════════════
 st.set_page_config(page_title="Model Health & Retraining", page_icon="🧠", layout="wide")
 inject_premium_design()
+
+# ── Auth Gate ─────────────────────────────────────────────────────────────────
+require_auth(permission="view_model")
+
+with st.sidebar:
+    display_user_profile()
 
 st.markdown("""
 <div style="padding:1rem 0 1.5rem">

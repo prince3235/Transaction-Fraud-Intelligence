@@ -6,10 +6,18 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import time
 from app.premium_design import inject_premium_design
+from app.auth_guard import require_auth, display_user_profile
 
 st.set_page_config(page_title="Notification Center", page_icon="🔔", layout="wide")
 inject_premium_design()
+
+# ── Auth Gate ─────────────────────────────────────────────────────────────────
+require_auth(permission="view_alerts")
+
+with st.sidebar:
+    display_user_profile()
 
 st.markdown("""
 <div style="padding:1rem 0 1.5rem">

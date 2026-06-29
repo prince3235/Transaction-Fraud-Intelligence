@@ -10,9 +10,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.premium_design import inject_premium_design
 from app.simulator import build_transaction
+from app.auth_guard import require_auth, display_user_profile
 
 st.set_page_config(page_title="Simulation Workspace", page_icon="🧪", layout="wide")
 inject_premium_design()
+
+# ── Auth Gate ─────────────────────────────────────────────────────────────────
+require_auth(permission="view_dashboard")
+
+with st.sidebar:
+    display_user_profile()
 
 st.markdown("""
 <div style="padding:1rem 0 1.5rem">

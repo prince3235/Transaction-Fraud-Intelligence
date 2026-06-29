@@ -12,9 +12,19 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.utils_dashboard import get_db_path, load_logs_df
 from app.premium_design import inject_premium_design
+from app.auth_guard import require_auth, display_user_profile
 
 st.set_page_config(page_title="Compliance Operations Console", page_icon="🚨", layout="wide")
 inject_premium_design()
+
+# ── Auth Gate ─────────────────────────────────────────────────────────────────
+require_auth(permission="view_alerts")
+
+# ════════════════════════════════════════════════════════════════════════════
+#  SIDEBAR
+# ════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    display_user_profile()
 
 st.markdown("""
 <div style="padding:1rem 0 1.5rem">

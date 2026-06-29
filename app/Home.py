@@ -12,13 +12,15 @@ from datetime import datetime
 
 from app.utils_dashboard  import get_db_path, load_logs_df, get_total_count
 from app.premium_design   import inject_premium_design
+from app.auth_guard       import display_user_profile
+from src.auth             import authenticate, DEMO_USERS
 import time
 
 # ════════════════════════════════════════════════════════════════════════════
 #  PAGE CONFIG
 # ════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Fraud Intelligence Platform",
+    page_title="Fraud Intelligence Dashboard",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -34,6 +36,51 @@ if "sim_counter"      not in st.session_state:
     st.session_state.sim_counter      = 9000    # auto-increment SIM ID
 if "last_injected_id" not in st.session_state:
     st.session_state.last_injected_id = None    # highlight newest row
+
+DB_PATH = get_db_path(PROJECT_ROOT)
+
+# ════════════════════════════════════════════════════════════════════════════
+#  LOGIN GATE
+# ════════════════════════════════════════════════════════════════════════════
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+if not st.session_state.user:
+    st.markdown("""
+    <div style="padding:4rem 0;text-align:center;">
+      <div class="page-title">
+        Enterprise Fraud <span class="gradient-word">Intelligence</span>
+      </div>
+      <div class="page-subtitle">
+        Secure Access Portal
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        with st.form("login_form"):
+            st.markdown('<div class="section-label">Sign In</div>', unsafe_allow_html=True)
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Secure Login", use_container_width=True)
+            
+            if submitted:
+                user = authenticate(DB_PATH, username, password)
+                if user:
+                    st.session_state.user = user
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials")
+        
+        st.markdown('<div class="section-label" style="margin-top:20px;">Demo Credentials</div>', unsafe_allow_html=True)
+        for demo in DEMO_USERS:
+            if st.button(f"{demo['role']} ({demo['username']})", use_container_width=True):
+                user = authenticate(DB_PATH, demo['username'], demo['password'])
+                if user:
+                    st.session_state.user = user
+                    st.rerun()
+    st.stop()
 
 
 # ════════════════════════════════════════════════════════════════════════════
