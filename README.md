@@ -15,8 +15,9 @@ This platform bridges the gap between raw Machine Learning outputs and human Com
 ### 2. Policy & Compliance Operations
 *   **Business Rules Engine:** Dynamic heuristic rules (e.g., Velocity, Impossible Travel) that override or augment ML scores.
 *   **Case Management System:** Full investigative queue with timelines, internal notes, and assignment (Open, Investigating, Escalated, Resolved).
+*   **LLM Copilot (AIOps):** Natural language transaction explanations and chat support powered by Claude, strictly constrained to database context.
 *   **Role-Based Access Control (RBAC):** Secure access tiers (Admin, Analyst, Executive, Data Scientist).
-*   **Immutable Audit Logs:** Strict tracking of every action (status changes, model deployments, rule creation) for regulatory compliance.
+*   **Immutable Audit Logs:** Strict tracking of every action (status changes, model deployments, rule creation, and all LLM Copilot queries) for regulatory compliance.
 
 ### 3. Analytics & Intelligence
 *   **Customer Risk 360:** Lazy-aggregated profiles showing lifetime risk scores, fraud flags, and mock device/location intelligence.
@@ -30,11 +31,18 @@ This platform bridges the gap between raw Machine Learning outputs and human Com
 ### Prerequisites
 * Python 3.10+
 * 8GB RAM minimum (Optimized for standard dev environments)
+* Anthropic API Key (for LLM Copilot)
 
 ### Installation
 1. Clone the repository and install dependencies:
 ```bash
 pip install -r requirements.txt
+```
+
+2. Configure environment variables:
+Create a `.env` file in the root directory (refer to `.env.example`) and add your API key:
+```env
+ANTHROPIC_API_KEY=your-api-key-here
 ```
 
 2. Generate Demo Data & Migrations (Enterprise Seeder):
