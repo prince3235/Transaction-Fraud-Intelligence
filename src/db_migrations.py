@@ -212,5 +212,24 @@ def run_migrations(db_path: Path) -> None:
         )
     """)
 
+    # ── M010: LLM Copilot Audit Logs ────────────────────────────────────────
+    # Every LLM query + response is logged for regulatory compliance.
+    # LLM outputs that influence financial decisions must be fully traceable.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS copilot_logs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id             TEXT,
+            prediction_log_id   INTEGER,
+            query_context_json  TEXT NOT NULL,
+            llm_response        TEXT,
+            model_used          TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
+            tokens_used         INTEGER,
+            latency_ms          INTEGER,
+            is_cached           INTEGER NOT NULL DEFAULT 0,
+            error               TEXT,
+            created_at          TEXT NOT NULL
+        )
+    """)
+
     con.commit()
     con.close()
