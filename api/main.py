@@ -1,5 +1,7 @@
 from datetime import timedelta
 import random
+import logging
+from typing import Optional
 
 from pathlib import Path
 from datetime import datetime, timezone
@@ -10,6 +12,8 @@ from pydantic import BaseModel, Field
 
 import sqlite3
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from src.features import build_features, align_to_model_columns, load_json
 from src.risk_scoring import score_probability, apply_policy_overrides
@@ -328,3 +332,89 @@ def explain_log(log_id: int):
         "override_reasons": json.loads(row[7]) if row[7] else [],
         "explanation": "ML model assessed base risk. Policy engine may have elevated it based on business rules."
     }    
+
+
+# ========== LLM COPILOT ENDPOINTS ==========
+
+class CopilotRequest(BaseModel):
+    prediction_log_id: Optional[int] = None
+    case_id: Optional[str] = None
+    follow_up: Optional[str] = None
+
+    class Config:
+        # Allow either prediction_log_id OR case_id
+        pass
+
+
+@app.post("/copilot/explain")
+def copilot_explain(req: CopilotRequest):
+    """
+    Generate a natural-language explanation for a flagged transaction.
+
+    Accepts either { "prediction_log_id": int } or { "case_id": str }.
+    Optionally include { "follow_up": "Has this user been flagged before?" }
+    for follow-up questions.
+
+    Returns plain-English explanation written for compliance analyst audience.
+    Logs every query + response to copilot_logs for regulatory audit trail.
+    Falls back gracefully if LLM API is unavailable (never blocks analyst workflow).
+    """
+    if not req.prediction_log_id and not req.case_id:
+        return {"error": "Either prediction_log_id or case_id is required.", "explanation": None}
+
+    try:
+        from src.llm_copilot import CopilotEngine
+        from src.db_migrations import run_migrations
+
+        # Ensure copilot_logs table exists
+        run_migrations(DB_PATH)
+
+        engine = CopilotEngine(db_path=DB_PATH, project_root=BASE_DIR)
+        result = engine.explain(
+            prediction_log_id=req.prediction_log_id,
+            case_id=req.case_id,
+            follow_up_question=req.follow_up,
+        )
+
+        return {
+            "prediction_log_id": req.prediction_log_id,
+            "case_id": req.case_id,
+            "explanation": result.get("explanation"),
+            "is_cached": result.get("is_cached", False),
+            "latency_ms": result.get("latency_ms", 0),
+            "error": result.get("error"),
+            "model": "claude-sonnet-4-6",
+        }
+
+    except Exception as exc:
+        # Graceful degradation: never let LLM issues block the analyst UI
+        import traceback
+        logger.error("Copilot endpoint error: %s\n%s", exc, traceback.format_exc())
+        return {
+            "prediction_log_id": req.prediction_log_id,
+            "case_id": req.case_id,
+            "explanation": None,
+            "error": f"Copilot temporarily unavailable: {type(exc).__name__}",
+            "is_cached": False,
+            "latency_ms": 0,
+        }
+
+
+@app.get("/copilot/logs")
+def get_copilot_logs(limit: int = 50):
+    """Fetch recent copilot query audit logs (admin/compliance use)."""
+    try:
+        con = sqlite3.connect(DB_PATH, check_same_thread=False)
+        rows = con.execute(
+            """SELECT id, case_id, prediction_log_id, llm_response, model_used,
+                      tokens_used, latency_ms, is_cached, error, created_at
+               FROM copilot_logs ORDER BY id DESC LIMIT ?""",
+            (int(limit),),
+        ).fetchall()
+        con.close()
+
+        cols = ["id", "case_id", "prediction_log_id", "llm_response", "model_used",
+                "tokens_used", "latency_ms", "is_cached", "error", "created_at"]
+        return {"count": len(rows), "logs": [dict(zip(cols, r)) for r in rows]}
+    except Exception as exc:
+        return {"error": str(exc), "logs": []}
