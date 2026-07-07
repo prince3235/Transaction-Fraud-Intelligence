@@ -2,7 +2,7 @@
 
 import { DataTable } from "@/components/shared/DataTable"
 import { RiskBadge } from "@/components/shared/RiskBadge"
-import { SonarPulse } from "@/components/shared/SonarPulse"
+import { StampAnimation } from "@/components/shared/StampAnimation"
 import { Button } from "@/components/ui/button"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api/client"
@@ -21,7 +21,7 @@ export default function AlertsPage() {
     initialData: []
   })
 
-  // To track new alerts for SonarPulse
+  // To track new alerts for StampAnimation
   const [knownIds, setKnownIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -45,16 +45,16 @@ export default function AlertsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="font-display text-xl font-medium text-mist">Live Alerts</h2>
+        <h2 className="font-display text-xl font-medium text-ink">Live Alerts</h2>
         <div className="flex gap-3">
           {/* Mock filters */}
-          <select className="bg-trench border border-mist/20 rounded-md px-3 py-1.5 text-sm text-mist focus:outline-none focus:border-signal">
+          <select className="bg-paper border border-ink/20 rounded-md px-3 py-1.5 text-sm text-ink focus:outline-none focus:border-clay">
             <option>All Risk Levels</option>
             <option>High Risk</option>
             <option>Medium Risk</option>
           </select>
           {canBulkAssign && (
-            <Button variant="outline" className="border-mist/20 text-mist hover:bg-mist/10">
+            <Button variant="outline" className="border-ink/20 text-ink hover:bg-ink/10">
               Bulk Assign
             </Button>
           )}
@@ -71,16 +71,16 @@ export default function AlertsPage() {
             cell: (item) => {
               const isNew = !knownIds.has(item.id) && knownIds.size > 0;
               return (
-                <SonarPulse trigger={isNew} color={item.risk_level === 'high' ? 'ember' : 'signal'}>
-                  <RiskBadge level={item.risk_level} />
-                </SonarPulse>
+                <StampAnimation trigger={isNew} tone={item.risk_level === 'high' ? 'danger' : 'default'}>
+                  {item.risk_level}
+                </StampAnimation>
               )
             }
           },
           { 
             header: "Txn ID", 
             accessorKey: "transaction_id",
-            className: "font-mono text-sm text-mist/80"
+            className: "font-mono text-sm text-ink/80"
           },
           { 
             header: "Amount",
@@ -88,11 +88,11 @@ export default function AlertsPage() {
           },
           { 
             header: "Probability",
-            cell: (item) => <span className="font-mono text-sm text-mist/60">{(item.fraud_probability * 100).toFixed(1)}%</span>
+            cell: (item) => <span className="font-mono text-sm text-ink/60">{(item.fraud_probability * 100).toFixed(1)}%</span>
           },
           { 
             header: "Time",
-            cell: (item) => <span className="font-mono text-xs text-mist/40">{new Date(item.timestamp).toLocaleTimeString()}</span>
+            cell: (item) => <span className="font-mono text-xs text-ink/40">{new Date(item.timestamp).toLocaleTimeString()}</span>
           }
         ]}
       />

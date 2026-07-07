@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "./EmptyState";
-import { OpaquePanel } from "./OpaquePanel";
 import { cn } from "@/lib/utils";
 
 interface Column<T> {
@@ -44,10 +43,10 @@ export function DataTable<T extends { id: string }>({
 }: DataTableProps<T>) {
   if (isLoading) {
     return (
-      <OpaquePanel className={cn("overflow-hidden", className)}>
+      <div className={cn("overflow-hidden w-full", className)}>
         <Table>
           <TableHeader>
-            <TableRow>
+            <TableRow className="border-b-2 border-ink/20">
               {columns.map((col, i) => (
                 <TableHead key={i} className={col.className}>{col.header}</TableHead>
               ))}
@@ -55,41 +54,41 @@ export function DataTable<T extends { id: string }>({
           </TableHeader>
           <TableBody>
             {Array.from({ length: 5 }).map((_, i) => (
-              <TableRow key={i}>
+              <TableRow key={i} className="border-b border-ink/8">
                 {columns.map((col, j) => (
                   <TableCell key={j} className={col.className}>
-                    <Skeleton className="h-4 w-full bg-mist/10" />
+                    <Skeleton className="h-4 w-full bg-ink/10" />
                   </TableCell>
                 ))}
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </OpaquePanel>
+      </div>
     );
   }
 
   if (data.length === 0) {
     return (
-      <OpaquePanel className={cn("p-8", className)}>
+      <div className={cn("p-8 w-full", className)}>
         <EmptyState
           title={emptyStateTitle}
           description={emptyStateDescription}
           action={emptyStateAction}
           icon={emptyStateIcon}
         />
-      </OpaquePanel>
+      </div>
     );
   }
 
   return (
-    <OpaquePanel className={cn("overflow-hidden", className)}>
+    <div className={cn("overflow-hidden w-full", className)}>
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow className="border-b border-mist/20 hover:bg-transparent">
+            <TableRow className="border-b-2 border-ink/20 hover:bg-transparent">
               {columns.map((col, i) => (
-                <TableHead key={i} className={cn("sticky top-0 bg-trench z-10", col.className)}>
+                <TableHead key={i} className={cn("sticky top-0 bg-paper z-10 text-ink/70 font-medium", col.className)}>
                   {col.header}
                 </TableHead>
               ))}
@@ -101,12 +100,12 @@ export function DataTable<T extends { id: string }>({
                 key={item.id}
                 onClick={() => onRowClick?.(item)}
                 className={cn(
-                  "border-b border-mist/10",
-                  onRowClick && "cursor-pointer hover:bg-mist/5 transition-colors duration-150"
+                  "border-b border-ink/8",
+                  onRowClick && "cursor-pointer hover:bg-ink/5 transition-colors duration-150"
                 )}
               >
                 {columns.map((col, j) => (
-                  <TableCell key={j} className={col.className}>
+                  <TableCell key={j} className={cn("text-ink", col.className)}>
                     {col.cell ? col.cell(item) : (col.accessorKey ? item[col.accessorKey] as React.ReactNode : null)}
                   </TableCell>
                 ))}
@@ -115,6 +114,6 @@ export function DataTable<T extends { id: string }>({
           </TableBody>
         </Table>
       </div>
-    </OpaquePanel>
+    </div>
   );
 }
