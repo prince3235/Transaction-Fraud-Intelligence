@@ -33,7 +33,18 @@ This platform bridges the gap between raw Machine Learning outputs and human Com
 * 8GB RAM minimum (Optimized for standard dev environments)
 * Anthropic API Key (for LLM Copilot)
 
-### Installation
+### Model Artifacts
+
+Large binary files and datasets are tracked using Data Version Control (DVC).
+
+To fetch the artifacts:
+1. Ensure DVC is installed (`pip install dvc[s3]`).
+2. Configure AWS credentials (e.g. `aws configure`).
+3. Run `dvc pull` to fetch the `best_fraud_model.pkl` and datasets.
+
+*Note: The current remote is configured as a local placeholder. Once an S3 bucket is provisioned, the remote should be updated via `dvc remote modify default url s3://your-bucket-name/dvc-store`.*
+
+## Installation
 1. Clone the repository and install dependencies:
 ```bash
 pip install -r requirements.txt
