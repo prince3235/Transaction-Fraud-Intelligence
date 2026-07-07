@@ -2,7 +2,7 @@
 Enterprise Business Rules Engine.
 
 Provides:
-- Configurable rule definitions stored in SQLite
+- Configurable rule definitions stored in Postgres
 - Priority-ordered rule evaluation
 - Pre-built default rules seeded at startup
 - Triggered count tracking
@@ -11,10 +11,13 @@ Provides:
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import simpleeval
+from src.db import SessionLocal
+from src.models import BusinessRule
 
 
 # ── Rule types ────────────────────────────────────────────────────────────────
@@ -35,7 +38,7 @@ DEFAULT_RULES = [
         "name": "Large Amount Transfer",
         "description": "Flag transactions above ₹75,000 — high fraud risk",
         "rule_type": "threshold",
-        "condition_json": json.dumps({"field": "amount", "operator": ">", "threshold": 75000}),
+        "condition_json": "amount > 75000",
         "action": "flag",
         "risk_level_bump": "HIGH",
         "priority": 90,
@@ -44,7 +47,7 @@ DEFAULT_RULES = [
         "name": "Account Drainage",
         "description": "Sender's account fully emptied — strong fraud signal",
         "rule_type": "flag",
-        "condition_json": json.dumps({"field": "sender_account_emptied", "equals": 1}),
+        "condition_json": "sender_account_emptied == 1",
         "action": "flag",
         "risk_level_bump": "HIGH",
         "priority": 95,
@@ -53,7 +56,7 @@ DEFAULT_RULES = [
         "name": "High Velocity Transaction",
         "description": "Transaction occurs in a step with abnormally high activity",
         "rule_type": "flag",
-        "condition_json": json.dumps({"field": "is_high_velocity_step", "equals": 1}),
+        "condition_json": "is_high_velocity_step == 1",
         "action": "flag",
         "risk_level_bump": "MEDIUM",
         "priority": 60,
@@ -62,7 +65,7 @@ DEFAULT_RULES = [
         "name": "New Destination Account",
         "description": "Destination account had zero balance — potential money mule",
         "rule_type": "flag",
-        "condition_json": json.dumps({"field": "is_oldbalanceDest_zero", "equals": 1}),
+        "condition_json": "is_oldbalanceDest_zero == 1",
         "action": "flag",
         "risk_level_bump": "MEDIUM",
         "priority": 70,
@@ -71,7 +74,7 @@ DEFAULT_RULES = [
         "name": "Balance Error Detected",
         "description": "Post-transaction balance doesn't match expected — data anomaly",
         "rule_type": "threshold",
-        "condition_json": json.dumps({"field": "balance_error_orig", "operator": "!=", "threshold": 0}),
+        "condition_json": "balance_error_orig != 0",
         "action": "flag",
         "risk_level_bump": "MEDIUM",
         "priority": 75,
@@ -80,7 +83,7 @@ DEFAULT_RULES = [
         "name": "High Risk Transaction Type",
         "description": "TRANSFER and CASH_OUT are highest-risk transaction types",
         "rule_type": "threshold",
-        "condition_json": json.dumps({"field": "type_risk_score", "operator": ">=", "threshold": 3}),
+        "condition_json": "type_risk_score >= 3",
         "action": "flag",
         "risk_level_bump": "MEDIUM",
         "priority": 65,
@@ -89,7 +92,7 @@ DEFAULT_RULES = [
         "name": "Multiple Suspicious Signals",
         "description": "3 or more concurrent suspicious signals detected",
         "rule_type": "threshold",
-        "condition_json": json.dumps({"field": "suspicious_signal_count", "operator": ">=", "threshold": 3}),
+        "condition_json": "suspicious_signal_count >= 3",
         "action": "flag",
         "risk_level_bump": "HIGH",
         "priority": 85,
@@ -98,7 +101,7 @@ DEFAULT_RULES = [
         "name": "Critical Signal Accumulation",
         "description": "5 or more suspicious signals — automatic CRITICAL escalation",
         "rule_type": "threshold",
-        "condition_json": json.dumps({"field": "suspicious_signal_count", "operator": ">=", "threshold": 5}),
+        "condition_json": "suspicious_signal_count >= 5",
         "action": "escalate",
         "risk_level_bump": "CRITICAL",
         "priority": 100,
@@ -112,12 +115,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(db_path, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    return con
-
-
 # ── Database operations ───────────────────────────────────────────────────────
 
 def seed_default_rules(db_path: Path) -> None:
@@ -126,78 +123,90 @@ def seed_default_rules(db_path: Path) -> None:
     Safe to call on every startup.
 
     Args:
-        db_path: Path to SQLite database.
+        db_path: Path to SQLite database. (ignored, kept for signature compat)
     """
-    con = _connect(db_path)
-    cur = con.cursor()
+    db = SessionLocal()
     now = _now()
-
-    for rule in DEFAULT_RULES:
-        cur.execute("SELECT id FROM business_rules WHERE name = ?", (rule["name"],))
-        if cur.fetchone() is None:
-            cur.execute(
-                """
-                INSERT INTO business_rules
-                    (name, description, rule_type, condition_json, action,
-                     risk_level_bump, priority, is_active, triggered_count,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-                """,
-                (
-                    rule["name"],
-                    rule["description"],
-                    rule["rule_type"],
-                    rule["condition_json"],
-                    rule["action"],
-                    rule["risk_level_bump"],
-                    rule["priority"],
-                    now,
-                    now,
-                ),
-            )
-
-    con.commit()
-    con.close()
+    
+    try:
+        for rule_data in DEFAULT_RULES:
+            exists = db.query(BusinessRule).filter(BusinessRule.name == rule_data["name"]).first()
+            if not exists:
+                new_rule = BusinessRule(
+                    name=rule_data["name"],
+                    description=rule_data["description"],
+                    rule_type=rule_data["rule_type"],
+                    condition_json=rule_data["condition_json"],
+                    action=rule_data["action"],
+                    risk_level_bump=rule_data["risk_level_bump"],
+                    priority=rule_data["priority"],
+                    is_active=True,
+                    triggered_count=0,
+                    created_at=now,
+                    updated_at=now
+                )
+                db.add(new_rule)
+        db.commit()
+    finally:
+        db.close()
 
 
 def list_rules(db_path: Path, active_only: bool = False) -> List[Dict[str, Any]]:
     """
     List all business rules.
-
-    Args:
-        db_path: Path to SQLite database.
-        active_only: If True, only return active rules.
-
-    Returns:
-        List of rule dicts, ordered by priority DESC.
     """
-    query = """
-        SELECT * FROM business_rules
-        {}
-        ORDER BY priority DESC, id ASC
-    """.format("WHERE is_active = 1" if active_only else "")
-
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute(query)
-    rows = cur.fetchall()
-    con.close()
-    return [dict(r) for r in rows]
+    db = SessionLocal()
+    try:
+        query = db.query(BusinessRule)
+        if active_only:
+            query = query.filter(BusinessRule.is_active == True)
+        
+        rules = query.order_by(BusinessRule.priority.desc(), BusinessRule.id.asc()).all()
+        return [{
+            "id": r.id,
+            "name": r.name,
+            "description": r.description,
+            "rule_type": r.rule_type,
+            "condition_json": r.condition_json,
+            "action": r.action,
+            "risk_level_bump": r.risk_level_bump,
+            "priority": r.priority,
+            "is_active": r.is_active,
+            "triggered_count": r.triggered_count,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at
+        } for r in rules]
+    finally:
+        db.close()
 
 
 def toggle_rule(db_path: Path, rule_id: int, is_active: bool) -> Optional[Dict[str, Any]]:
     """Enable or disable a business rule."""
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute(
-        "UPDATE business_rules SET is_active = ?, updated_at = ? WHERE id = ?",
-        (1 if is_active else 0, _now(), rule_id),
-    )
-    con.commit()
-    cur.execute("SELECT * FROM business_rules WHERE id = ?", (rule_id,))
-    row = cur.fetchone()
-    con.close()
-    return dict(row) if row else None
+    db = SessionLocal()
+    try:
+        rule = db.query(BusinessRule).filter(BusinessRule.id == rule_id).first()
+        if rule:
+            rule.is_active = is_active
+            rule.updated_at = _now()
+            db.commit()
+            db.refresh(rule)
+            return {
+                "id": rule.id,
+                "name": rule.name,
+                "description": rule.description,
+                "rule_type": rule.rule_type,
+                "condition_json": rule.condition_json,
+                "action": rule.action,
+                "risk_level_bump": rule.risk_level_bump,
+                "priority": rule.priority,
+                "is_active": rule.is_active,
+                "triggered_count": rule.triggered_count,
+                "created_at": rule.created_at,
+                "updated_at": rule.updated_at
+            }
+        return None
+    finally:
+        db.close()
 
 
 def create_rule(
@@ -205,30 +214,65 @@ def create_rule(
     name: str,
     description: str,
     rule_type: str,
-    condition: Dict[str, Any],
+    condition: str,
     action: str,
     risk_level_bump: str,
     priority: int,
 ) -> Dict[str, Any]:
     """Create a new business rule."""
+    if "__" in condition:
+        raise ValueError("Invalid expression: '__' is not allowed")
+    if len(condition) > 500:
+        raise ValueError("Invalid expression: exceeds 500 characters")
+        
+    class DummyDict(dict):
+        def __getitem__(self, key):
+            return 0
+    try:
+        evaluator = simpleeval.SimpleEval(names=DummyDict(), functions={"abs": abs})
+        evaluator.eval(condition)
+    except (simpleeval.InvalidExpression, SyntaxError) as e:
+        raise ValueError(f"Invalid rule syntax: {e}")
+    except (simpleeval.NameNotDefined, simpleeval.FunctionNotDefined):
+        pass
+    except Exception as e:
+        raise ValueError(f"Invalid rule: {e}")
+
     now = _now()
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute(
-        """
-        INSERT INTO business_rules
-            (name, description, rule_type, condition_json, action,
-             risk_level_bump, priority, is_active, triggered_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-        """,
-        (name, description, rule_type, json.dumps(condition), action, risk_level_bump, priority, now, now),
-    )
-    con.commit()
-    row_id = cur.lastrowid
-    cur.execute("SELECT * FROM business_rules WHERE id = ?", (row_id,))
-    row = cur.fetchone()
-    con.close()
-    return dict(row)
+    db = SessionLocal()
+    try:
+        rule = BusinessRule(
+            name=name,
+            description=description,
+            rule_type=rule_type,
+            condition_json=condition,
+            action=action,
+            risk_level_bump=risk_level_bump,
+            priority=priority,
+            is_active=True,
+            triggered_count=0,
+            created_at=now,
+            updated_at=now
+        )
+        db.add(rule)
+        db.commit()
+        db.refresh(rule)
+        return {
+            "id": rule.id,
+            "name": rule.name,
+            "description": rule.description,
+            "rule_type": rule.rule_type,
+            "condition_json": rule.condition_json,
+            "action": rule.action,
+            "risk_level_bump": rule.risk_level_bump,
+            "priority": rule.priority,
+            "is_active": rule.is_active,
+            "triggered_count": rule.triggered_count,
+            "created_at": rule.created_at,
+            "updated_at": rule.updated_at
+        }
+    finally:
+        db.close()
 
 
 # ── Rule evaluation ───────────────────────────────────────────────────────────
@@ -240,8 +284,7 @@ def _evaluate_single_rule(rule: Dict[str, Any], features: Dict[str, Any]) -> boo
     """
     Evaluate a single rule against a feature dict.
 
-    Supports operators: >, <, >=, <=, ==, !=
-    And flag-type rules with 'equals' check.
+    Uses simpleeval for safe mathematical/logical expression evaluation.
 
     Args:
         rule: Rule dict from DB.
@@ -250,37 +293,21 @@ def _evaluate_single_rule(rule: Dict[str, Any], features: Dict[str, Any]) -> boo
     Returns:
         True if the rule condition is satisfied.
     """
-    try:
-        condition = json.loads(rule["condition_json"]) if isinstance(rule["condition_json"], str) else rule["condition_json"]
-    except (json.JSONDecodeError, TypeError):
+    condition = rule.get("condition_json", "")
+    if not isinstance(condition, str):
+        # Graceful fail if legacy JSON wasn't migrated
+        print(f"Warning: Rule '{rule['name']}' condition is not a string expression. Run migration.")
         return False
 
-    field = condition.get("field")
-    if field is None or field not in features:
-        return False
-
-    value = features[field]
-
-    # Flag-type: exact equality check
-    if "equals" in condition:
-        return value == condition["equals"]
-
-    # Threshold-type: comparison
-    operator = condition.get("operator", "==")
-    threshold = condition.get("threshold", 0)
-
     try:
-        v = float(value)
-        t = float(threshold)
-        return {
-            ">": v > t,
-            ">=": v >= t,
-            "<": v < t,
-            "<=": v <= t,
-            "==": v == t,
-            "!=": v != t,
-        }.get(operator, False)
-    except (ValueError, TypeError):
+        evaluator = simpleeval.SimpleEval(names=features, functions={"abs": abs})
+        result = evaluator.eval(condition)
+        return bool(result)
+    except (simpleeval.InvalidExpression, simpleeval.NameNotDefined, simpleeval.FunctionNotDefined, SyntaxError) as e:
+        print(f"Warning: Rule '{rule['name']}' failed to evaluate (fail-closed). Error: {e}")
+        return False
+    except Exception as e:
+        print(f"Warning: Rule '{rule['name']}' failed unexpectedly (fail-closed). Error: {e}")
         return False
 
 
@@ -291,14 +318,6 @@ def evaluate_rules(
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Evaluate all active business rules against a feature set.
-
-    Args:
-        db_path: Path to SQLite database.
-        features: Feature values from ML pipeline.
-        current_risk_level: Starting risk level (from ML model).
-
-    Returns:
-        Tuple of (final_risk_level, list_of_triggered_rules).
     """
     rules = list_rules(db_path, active_only=True)
     triggered: List[Dict[str, Any]] = []
@@ -312,13 +331,14 @@ def evaluate_rules(
                 final_level = bump
 
     if triggered:
-        con = _connect(db_path)
-        for rule in triggered:
-            con.execute(
-                "UPDATE business_rules SET triggered_count = triggered_count + 1 WHERE id = ?",
-                (rule["id"],),
-            )
-        con.commit()
-        con.close()
+        db = SessionLocal()
+        try:
+            for rule in triggered:
+                db_rule = db.query(BusinessRule).filter(BusinessRule.id == rule["id"]).first()
+                if db_rule:
+                    db_rule.triggered_count += 1
+            db.commit()
+        finally:
+            db.close()
 
     return final_level, triggered

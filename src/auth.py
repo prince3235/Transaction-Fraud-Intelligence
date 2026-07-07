@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from src.db import SessionLocal
+from src.models import User, AuditLog
 
 # ── Role definitions ──────────────────────────────────────────────────────────
 
@@ -88,12 +89,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(db_path, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    return con
-
-
 def hash_password(password: str) -> str:
     """
     Hash a password using SHA-256 with a salt prefix.
@@ -118,114 +113,96 @@ def generate_session_token() -> str:
 def seed_demo_users(db_path: Path) -> None:
     """
     Seed the database with demo users if they don't already exist.
-    Safe to call multiple times — only inserts missing users.
-
-    Args:
-        db_path: Path to SQLite database.
     """
-    con = _connect(db_path)
-    cur = con.cursor()
-
-    for user in DEMO_USERS:
-        cur.execute("SELECT id FROM users WHERE username = ?", (user["username"],))
-        if cur.fetchone() is None:
-            cur.execute(
-                """
-                INSERT INTO users (username, email, password_hash, role, is_active, created_at)
-                VALUES (?, ?, ?, ?, 1, ?)
-                """,
-                (
-                    user["username"],
-                    user["email"],
-                    hash_password(user["password"]),
-                    user["role"],
-                    _now(),
-                ),
-            )
-
-    con.commit()
-    con.close()
+    db = SessionLocal()
+    try:
+        now = _now()
+        for user_data in DEMO_USERS:
+            exists = db.query(User).filter(User.username == user_data["username"]).first()
+            if not exists:
+                new_user = User(
+                    username=user_data["username"],
+                    email=user_data["email"],
+                    password_hash=hash_password(user_data["password"]),
+                    role=user_data["role"],
+                    is_active=True,
+                    created_at=now
+                )
+                db.add(new_user)
+        db.commit()
+    finally:
+        db.close()
 
 
 def authenticate(db_path: Path, username: str, password: str) -> Optional[Dict[str, Any]]:
     """
     Authenticate a user by username and password.
-
-    Args:
-        db_path: Path to SQLite database.
-        username: Username to authenticate.
-        password: Plaintext password.
-
-    Returns:
-        User dict if authentication succeeds, None otherwise.
     """
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute(
-        "SELECT * FROM users WHERE username = ? AND is_active = 1",
-        (username,),
-    )
-    row = cur.fetchone()
-    con.close()
-
-    if not row:
-        return None
-
-    user = dict(row)
-    if not verify_password(password, user["password_hash"]):
-        return None
-
-    # Update last_login
-    con = _connect(db_path)
-    con.execute(
-        "UPDATE users SET last_login = ? WHERE id = ?",
-        (_now(), user["id"]),
-    )
-    con.commit()
-    con.close()
-
-    # Don't return the password hash
-    user.pop("password_hash", None)
-    return user
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username, User.is_active == True).first()
+        if not user or not verify_password(password, user.password_hash):
+            return None
+            
+        user.last_login = _now()
+        db.commit()
+        db.refresh(user)
+        
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+            "last_login": user.last_login
+        }
+    finally:
+        db.close()
 
 
 def get_user_by_username(db_path: Path, username: str) -> Optional[Dict[str, Any]]:
     """Fetch a user by username (without password hash)."""
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute("SELECT * FROM users WHERE username = ?", (username,))
-    row = cur.fetchone()
-    con.close()
-    if not row:
-        return None
-    user = dict(row)
-    user.pop("password_hash", None)
-    return user
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            return None
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+            "last_login": user.last_login
+        }
+    finally:
+        db.close()
 
 
 def list_users(db_path: Path) -> List[Dict[str, Any]]:
     """Return all users (without password hashes)."""
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute("SELECT id, username, email, role, is_active, created_at, last_login FROM users ORDER BY id")
-    rows = cur.fetchall()
-    con.close()
-    return [dict(r) for r in rows]
+    db = SessionLocal()
+    try:
+        users = db.query(User).order_by(User.id).all()
+        return [{
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "role": u.role,
+            "is_active": u.is_active,
+            "created_at": u.created_at,
+            "last_login": u.last_login
+        } for u in users]
+    finally:
+        db.close()
 
 
 # ── Permission checking ───────────────────────────────────────────────────────
 
 def has_permission(role: str, permission: str) -> bool:
-    """
-    Check if a given role has a specific permission.
-
-    Args:
-        role: User role name.
-        permission: Permission string to check.
-
-    Returns:
-        True if the role has the permission.
-    """
+    """Check if a given role has a specific permission."""
     role_def = ROLES.get(role, {})
     return permission in role_def.get("permissions", [])
 
@@ -248,42 +225,24 @@ def log_audit_event(
     ip_address: str = "127.0.0.1",
     reason: Optional[str] = None,
 ) -> None:
-    """
-    Write an enterprise audit log entry.
-
-    Args:
-        db_path: Path to SQLite database.
-        username: Actor's username.
-        action: Human-readable action description (e.g., "Case Status Updated").
-        entity_type: Type of entity affected (e.g., "fraud_case", "rule").
-        entity_id: ID or identifier of the affected entity.
-        old_value: Previous value (will be JSON-serialized).
-        new_value: New value (will be JSON-serialized).
-        ip_address: Actor's IP address.
-        reason: Optional reason for the action.
-    """
-    con = _connect(db_path)
-    con.execute(
-        """
-        INSERT INTO audit_logs
-            (username, action, entity_type, entity_id,
-             old_value_json, new_value_json, ip_address, reason, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            username,
-            action,
-            entity_type,
-            str(entity_id) if entity_id is not None else None,
-            json.dumps(old_value) if old_value is not None else None,
-            json.dumps(new_value) if new_value is not None else None,
-            ip_address,
-            reason,
-            _now(),
-        ),
-    )
-    con.commit()
-    con.close()
+    """Write an enterprise audit log entry."""
+    db = SessionLocal()
+    try:
+        log = AuditLog(
+            username=username,
+            action=action,
+            entity_type=entity_type,
+            entity_id=str(entity_id) if entity_id is not None else None,
+            old_value_json=old_value,
+            new_value_json=new_value,
+            ip_address=ip_address,
+            reason=reason,
+            timestamp=_now()
+        )
+        db.add(log)
+        db.commit()
+    finally:
+        db.close()
 
 
 def fetch_audit_logs(
@@ -293,23 +252,26 @@ def fetch_audit_logs(
     limit: int = 200,
 ) -> List[Dict[str, Any]]:
     """Fetch audit log entries with optional filters."""
-    clauses: List[str] = []
-    params: List[Any] = []
-
-    if username:
-        clauses.append("username = ?")
-        params.append(username)
-    if entity_type:
-        clauses.append("entity_type = ?")
-        params.append(entity_type)
-
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    query = f"SELECT * FROM audit_logs {where} ORDER BY id DESC LIMIT ?"
-    params.append(limit)
-
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    con.close()
-    return [dict(r) for r in rows]
+    db = SessionLocal()
+    try:
+        query = db.query(AuditLog)
+        if username:
+            query = query.filter(AuditLog.username == username)
+        if entity_type:
+            query = query.filter(AuditLog.entity_type == entity_type)
+            
+        logs = query.order_by(AuditLog.id.desc()).limit(limit).all()
+        return [{
+            "id": log.id,
+            "username": log.username,
+            "action": log.action,
+            "entity_type": log.entity_type,
+            "entity_id": log.entity_id,
+            "old_value_json": log.old_value_json,
+            "new_value_json": log.new_value_json,
+            "ip_address": log.ip_address,
+            "reason": log.reason,
+            "timestamp": log.timestamp
+        } for log in logs]
+    finally:
+        db.close()

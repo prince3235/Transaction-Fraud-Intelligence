@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 import time
 import hashlib
 from datetime import datetime, timezone
@@ -198,6 +197,8 @@ Provide a clear, plain-English explanation (2-5 sentences) of why this transacti
 
 
 # ── Database helpers ──────────────────────────────────────────────────────────
+from src.db import SessionLocal
+from src.models import FraudCase, PredictionLog, CopilotLog
 
 def _fetch_case_context(
     db_path: Path,
@@ -205,82 +206,60 @@ def _fetch_case_context(
     case_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Fetch all relevant context from DB for a given log or case."""
-    con = sqlite3.connect(db_path, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    cur = con.cursor()
-
+    db = SessionLocal()
     try:
         if case_id:
-            row = cur.execute(
-                """SELECT fc.prediction_log_id, fc.case_id, fc.status, fc.priority, fc.title,
-                          pl.transaction_json, pl.ml_probability, pl.final_risk_level,
-                          pl.policy_override_applied, pl.policy_reasons_json, pl.id as log_id
-                   FROM fraud_cases fc
-                   LEFT JOIN prediction_logs pl ON fc.prediction_log_id = pl.id
-                   WHERE fc.case_id = ?""",
-                (case_id,),
-            ).fetchone()
+            case = db.query(FraudCase).filter(FraudCase.case_id == case_id).first()
+            if not case: return None
+            log = db.query(PredictionLog).filter(PredictionLog.id == case.prediction_log_id).first()
+            if not log: return None
+            
+            log_id = log.id
+            tx = log.transaction_json or {}
+            ml_prob = log.ml_probability
+            final_risk_level = log.final_risk_level
+            policy_override = log.policy_override_applied
+            policy_reasons = log.policy_reasons_json or []
+            status = case.status
+            priority = case.priority
+            title = case.title
         elif prediction_log_id is not None:
-            row = cur.execute(
-                """SELECT id as log_id, transaction_json, ml_probability, final_risk_level,
-                          policy_override_applied, policy_reasons_json, null as case_id,
-                          null as status, null as priority, null as title, id as prediction_log_id
-                   FROM prediction_logs WHERE id = ?""",
-                (prediction_log_id,),
-            ).fetchone()
+            log = db.query(PredictionLog).filter(PredictionLog.id == prediction_log_id).first()
+            if not log: return None
+            
+            log_id = log.id
+            tx = log.transaction_json or {}
+            ml_prob = log.ml_probability
+            final_risk_level = log.final_risk_level
+            policy_override = log.policy_override_applied
+            policy_reasons = log.policy_reasons_json or []
+            status = None
+            priority = None
+            title = None
         else:
             return None
-
-        if not row:
-            return None
-
-        row_dict = dict(row)
-        log_id = row_dict.get("log_id") or row_dict.get("prediction_log_id")
-
-        # Parse JSON fields
-        tx = {}
-        try:
-            tx_raw = row_dict.get("transaction_json", "{}")
-            tx = json.loads(tx_raw) if isinstance(tx_raw, str) else (tx_raw or {})
-        except Exception:
-            pass
-
-        policy_reasons = []
-        try:
-            pr_raw = row_dict.get("policy_reasons_json", "[]")
-            policy_reasons = json.loads(pr_raw) if isinstance(pr_raw, str) else (pr_raw or [])
-        except Exception:
-            pass
 
         # Fetch brief account history (last 10 transactions for that amount range)
         history = []
         if tx.get("amount"):
-            try:
-                history_rows = cur.execute(
-                    """SELECT final_risk_level, ml_probability, created_at
-                       FROM prediction_logs
-                       WHERE id != ? ORDER BY id DESC LIMIT 10""",
-                    (log_id,),
-                ).fetchall()
-                history = [dict(h) for h in history_rows]
-            except Exception:
-                pass
+            history_rows = db.query(PredictionLog).filter(PredictionLog.id != log_id).order_by(PredictionLog.id.desc()).limit(10).all()
+            history = [{"final_risk_level": h.final_risk_level, "ml_probability": h.ml_probability, "created_at": h.created_at} for h in history_rows]
 
         return {
             "prediction_log_id": log_id,
-            "case_id": row_dict.get("case_id"),
+            "case_id": case_id,
             "transaction": tx,
-            "ml_probability": float(row_dict.get("ml_probability") or 0.0),
-            "final_risk_level": row_dict.get("final_risk_level", "UNKNOWN"),
-            "policy_override_applied": bool(row_dict.get("policy_override_applied")),
+            "ml_probability": float(ml_prob or 0.0),
+            "final_risk_level": final_risk_level,
+            "policy_override_applied": bool(policy_override),
             "policy_reasons": policy_reasons,
             "user_history": history,
-            "case_status": row_dict.get("status"),
-            "case_priority": row_dict.get("priority"),
-            "case_title": row_dict.get("title"),
+            "case_status": status,
+            "case_priority": priority,
+            "case_title": title,
         }
     finally:
-        con.close()
+        db.close()
 
 
 def _log_copilot_query(
@@ -296,27 +275,24 @@ def _log_copilot_query(
 ) -> None:
     """Write every copilot query + response to copilot_logs for compliance audit."""
     try:
-        con = sqlite3.connect(db_path, check_same_thread=False)
-        con.execute(
-            """INSERT INTO copilot_logs
-               (case_id, prediction_log_id, query_context_json, llm_response,
-                model_used, tokens_used, latency_ms, is_cached, error, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                case_id,
-                prediction_log_id,
-                json.dumps(context),
-                response,
-                ANTHROPIC_MODEL,
-                tokens_used,
-                latency_ms,
-                1 if is_cached else 0,
-                error,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        con.commit()
-        con.close()
+        db = SessionLocal()
+        try:
+            log = CopilotLog(
+                case_id=case_id,
+                prediction_log_id=prediction_log_id,
+                query_context_json=context,
+                llm_response=response,
+                model_used=ANTHROPIC_MODEL,
+                tokens_used=tokens_used,
+                latency_ms=latency_ms,
+                is_cached=is_cached,
+                error=error,
+                created_at=datetime.now(timezone.utc).isoformat()
+            )
+            db.add(log)
+            db.commit()
+        finally:
+            db.close()
     except Exception as exc:
         logger.error("Failed to log copilot query to DB: %s", exc)
 

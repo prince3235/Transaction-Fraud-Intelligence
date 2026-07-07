@@ -8,7 +8,6 @@ Provides:
 """
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,31 +15,17 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from src.db import SessionLocal
+from src.models import DriftSnapshot
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _connect(db_path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(db_path, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    return con
-
-
 def calculate_psi(expected: np.ndarray, actual: np.ndarray, buckets: int = 10) -> float:
     """
     Calculate the Population Stability Index (PSI) between two arrays.
-    
-    Args:
-        expected: Baseline/Training distribution array.
-        actual: Current/Production distribution array.
-        buckets: Number of quantiles to use for binning.
-        
-    Returns:
-        float PSI score.
-        < 0.1: No significant change
-        0.1 - 0.2: Moderate change
-        > 0.2: Significant change (drift detected)
     """
     if len(expected) == 0 or len(actual) == 0:
         return 0.0
@@ -84,39 +69,64 @@ def record_drift_snapshot(
     now = _now()
     today = now[:10]
     
-    con = _connect(db_path)
-    cur = con.cursor()
-    
-    cur.execute(
-        """
-        INSERT INTO drift_snapshots 
-            (snapshot_date, feature_name, psi_score, alert_triggered, 
-             baseline_mean, current_mean, baseline_std, current_std, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (today, feature_name, psi_score, alert, baseline_mean, current_mean, baseline_std, current_std, now)
-    )
-    con.commit()
-    row_id = cur.lastrowid
-    
-    cur.execute("SELECT * FROM drift_snapshots WHERE id = ?", (row_id,))
-    row = cur.fetchone()
-    con.close()
-    return dict(row)
+    db = SessionLocal()
+    try:
+        snapshot = DriftSnapshot(
+            snapshot_date=today,
+            feature_name=feature_name,
+            psi_score=psi_score,
+            alert_triggered=bool(alert),
+            baseline_mean=baseline_mean,
+            current_mean=current_mean,
+            baseline_std=baseline_std,
+            current_std=current_std,
+            created_at=now
+        )
+        db.add(snapshot)
+        db.commit()
+        db.refresh(snapshot)
+        
+        return {
+            "id": snapshot.id,
+            "snapshot_date": snapshot.snapshot_date,
+            "feature_name": snapshot.feature_name,
+            "psi_score": snapshot.psi_score,
+            "alert_triggered": snapshot.alert_triggered,
+            "baseline_mean": snapshot.baseline_mean,
+            "current_mean": snapshot.current_mean,
+            "baseline_std": snapshot.baseline_std,
+            "current_std": snapshot.current_std,
+            "created_at": snapshot.created_at
+        }
+    finally:
+        db.close()
 
 
 def get_latest_drift_snapshots(db_path: Path) -> List[Dict[str, Any]]:
     """Get the most recent snapshot for each feature."""
-    query = """
-        SELECT * FROM drift_snapshots
-        WHERE id IN (
-            SELECT MAX(id) FROM drift_snapshots GROUP BY feature_name
-        )
-        ORDER BY psi_score DESC
-    """
-    con = _connect(db_path)
-    cur = con.cursor()
-    cur.execute(query)
-    rows = cur.fetchall()
-    con.close()
-    return [dict(r) for r in rows]
+    db = SessionLocal()
+    try:
+        from sqlalchemy import func
+        # Find latest ID per feature_name
+        subq = db.query(
+            func.max(DriftSnapshot.id).label('max_id')
+        ).group_by(DriftSnapshot.feature_name).subquery()
+        
+        snapshots = db.query(DriftSnapshot).join(
+            subq, DriftSnapshot.id == subq.c.max_id
+        ).order_by(DriftSnapshot.psi_score.desc()).all()
+        
+        return [{
+            "id": s.id,
+            "snapshot_date": s.snapshot_date,
+            "feature_name": s.feature_name,
+            "psi_score": s.psi_score,
+            "alert_triggered": s.alert_triggered,
+            "baseline_mean": s.baseline_mean,
+            "current_mean": s.current_mean,
+            "baseline_std": s.baseline_std,
+            "current_std": s.current_std,
+            "created_at": s.created_at
+        } for s in snapshots]
+    finally:
+        db.close()

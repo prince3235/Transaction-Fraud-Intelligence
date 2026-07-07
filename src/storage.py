@@ -1,58 +1,23 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from src.db import SessionLocal, engine
+from src.models import Base, PredictionLog
 
+def get_db_path(base_dir: Path = None) -> Path:
+    # Kept for backward compatibility if any module imports it
+    if base_dir is None:
+        base_dir = Path(__file__).resolve().parent.parent
+    return base_dir / "data" / "app_db" / "fraud_intelligence.db"
 
-def get_db_path(base_dir: Path) -> Path:
-    # keep DB inside data/ so it is clearly separate
-    db_dir = base_dir / "data" / "app_db"
-    db_dir.mkdir(parents=True, exist_ok=True)
-    return db_dir / "fraud_intelligence.db"
-
-
-def connect(db_path: Path) -> sqlite3.Connection:
-    # check_same_thread False helps when server uses threads
-    return sqlite3.connect(db_path, check_same_thread=False)
-
-
-def init_db(db_path: Path) -> None:
-    con = connect(db_path)
-    cur = con.cursor()
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS prediction_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            transaction_json TEXT NOT NULL,
-            ml_probability REAL NOT NULL,
-            ml_risk_level TEXT NOT NULL,
-            ml_risk_score INTEGER NOT NULL,
-            final_risk_level TEXT NOT NULL,
-            final_risk_score INTEGER NOT NULL,
-            policy_override_applied INTEGER NOT NULL,
-            policy_reasons_json TEXT NOT NULL,
-            suspicious_signal_count INTEGER,
-            alert_json TEXT
-        )
-        """
-    )
-
-    cur.execute("PRAGMA table_info(prediction_logs)")
-    columns = [col[1] for col in cur.fetchall()]
-    if "status" not in columns:
-        cur.execute("ALTER TABLE prediction_logs ADD COLUMN status TEXT NOT NULL DEFAULT 'APPROVED'")
-        cur.execute("UPDATE prediction_logs SET status = 'PENDING_REVIEW' WHERE final_risk_level IN ('MEDIUM', 'HIGH', 'CRITICAL')")
-
-    con.commit()
-    con.close()
-
+def init_db(db_path: Path = None) -> None:
+    # Now Alembic handles schema generation, but for tests or fallback:
+    Base.metadata.create_all(bind=engine)
 
 def log_prediction(
-    db_path: Path,
+    db_path: Path, # Ignored, kept for signature compat
     created_at: str,
     transaction: Dict[str, Any],
     ml_probability: float,
@@ -66,77 +31,50 @@ def log_prediction(
     alert: Optional[Dict[str, Any]] = None,
     status: Optional[str] = None,
 ) -> None:
-    con = connect(db_path)
-    cur = con.cursor()
-
-    cur.execute(
-        """
-        INSERT INTO prediction_logs (
-            created_at, transaction_json,
-            ml_probability, ml_risk_level, ml_risk_score,
-            final_risk_level, final_risk_score,
-            policy_override_applied, policy_reasons_json,
-            suspicious_signal_count, alert_json, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            created_at,
-            json.dumps(transaction),
-            float(ml_probability),
-            str(ml_risk_level),
-            int(ml_risk_score),
-            str(final_risk_level),
-            int(final_risk_score),
-            1 if policy_override_applied else 0,
-            json.dumps(policy_reasons),
-            int(suspicious_signal_count) if suspicious_signal_count is not None else None,
-            json.dumps(alert) if alert is not None else None,
-            status if status is not None else ("APPROVED" if final_risk_level == "LOW" else "PENDING_REVIEW"),
-        ),
-    )
-
-    con.commit()
-    con.close()
-
+    db = SessionLocal()
+    try:
+        log = PredictionLog(
+            created_at=created_at,
+            transaction_json=transaction,
+            ml_probability=float(ml_probability),
+            ml_risk_level=str(ml_risk_level),
+            ml_risk_score=int(ml_risk_score),
+            final_risk_level=str(final_risk_level),
+            final_risk_score=int(final_risk_score),
+            policy_override_applied=policy_override_applied,
+            policy_reasons_json=policy_reasons,
+            suspicious_signal_count=int(suspicious_signal_count) if suspicious_signal_count is not None else None,
+            alert_json=alert,
+            status=status if status is not None else ("APPROVED" if final_risk_level == "LOW" else "PENDING_REVIEW")
+        )
+        db.add(log)
+        db.commit()
+    finally:
+        db.close()
 
 def fetch_recent_logs(db_path: Path, limit: int = 50) -> List[Dict[str, Any]]:
-    con = connect(db_path)
-    cur = con.cursor()
-
-    cur.execute(
-        """
-        SELECT id, created_at, transaction_json,
-               ml_probability, ml_risk_level, ml_risk_score,
-               final_risk_level, final_risk_score,
-               policy_override_applied, policy_reasons_json,
-               suspicious_signal_count, alert_json, status
-        FROM prediction_logs
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (int(limit),),
-    )
-
-    rows = cur.fetchall()
-    con.close()
-
-    out = []
-    for r in rows:
-        out.append(
-            {
-                "id": r[0],
-                "created_at": r[1],
-                "transaction": json.loads(r[2]),
-                "ml_probability": r[3],
-                "ml_risk_level": r[4],
-                "ml_risk_score": r[5],
-                "final_risk_level": r[6],
-                "final_risk_score": r[7],
-                "policy_override_applied": bool(r[8]),
-                "policy_reasons": json.loads(r[9]),
-                "suspicious_signal_count": r[10],
-                "alert": json.loads(r[11]) if r[11] else None,
-                "status": r[12],
-            }
-        )
-    return out
+    db = SessionLocal()
+    try:
+        logs = db.query(PredictionLog).order_by(PredictionLog.id.desc()).limit(limit).all()
+        out = []
+        for r in logs:
+            out.append(
+                {
+                    "id": r.id,
+                    "created_at": r.created_at,
+                    "transaction": r.transaction_json,
+                    "ml_probability": r.ml_probability,
+                    "ml_risk_level": r.ml_risk_level,
+                    "ml_risk_score": r.ml_risk_score,
+                    "final_risk_level": r.final_risk_level,
+                    "final_risk_score": r.final_risk_score,
+                    "policy_override_applied": r.policy_override_applied,
+                    "policy_reasons": r.policy_reasons_json,
+                    "suspicious_signal_count": r.suspicious_signal_count,
+                    "alert": r.alert_json,
+                    "status": r.status,
+                }
+            )
+        return out
+    finally:
+        db.close()
