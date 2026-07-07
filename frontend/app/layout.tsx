@@ -1,21 +1,24 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Special_Elite, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const inter = Inter({
+const ibmPlexSans = IBM_Plex_Sans({
+  weight: ["400", "500", "600", "700"],
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-ibm-plex-sans",
 });
 
-const spaceGrotesk = Space_Grotesk({
+const specialElite = Special_Elite({
+  weight: "400",
   subsets: ["latin"],
-  variable: "--font-space-grotesk",
+  variable: "--font-special-elite",
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const ibmPlexMono = IBM_Plex_Mono({
+  weight: ["400", "500", "600"],
   subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
+  variable: "--font-ibm-plex-mono",
 });
 
 export const metadata: Metadata = {
@@ -29,9 +32,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body
-        className={`${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased min-h-screen bg-abyss text-mist font-sans`}
+        className={`${ibmPlexSans.variable} ${specialElite.variable} ${ibmPlexMono.variable} antialiased min-h-screen bg-paper text-ink font-sans`}
       >
         <Providers>{children}</Providers>
       </body>

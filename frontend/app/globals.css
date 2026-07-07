@@ -1,15 +1,16 @@
 /* 
 ===============================================================================
-DESIGN THESIS — "The Abyss"
+DESIGN THESIS — "The Ledger"
 ===============================================================================
-This platform uses "The Abyss" design concept to represent surfacing hidden fraud 
-signals like sonar in deep water. 
-- The base background is "the abyss" (dark, empty, calm).
-- Glass panels ("foam") are only used when floating above the base (e.g. Nav, 
-  Modals) to simulate looking through water. They are never used for data tables.
-- Data tables are strictly opaque ("trench") for high legibility.
-- Motion is intentional: the "sonar pulse" is a single, rare event reserved ONLY 
-  for new high-risk alerts to maximize its meaning.
+CONCEPT: the platform is, at its core, a permanent financial record —
+every prediction, every case, every status change is written once and
+never erased (the existing audit_logs table is literally immutable).
+Treat the UI as a physical ledger book: cream pages, ink-brown records,
+and a rubber-stamp gesture for the one moment that matters most —
+marking a case's final disposition. Structural devices should look like
+they belong to a ledger, not a generic dashboard: ruled hairlines under
+table rows (like ruled paper), tabular figures for every number, case
+IDs treated like ledger entry numbers.
 ===============================================================================
 */
 
@@ -19,55 +20,59 @@ signals like sonar in deep water.
 
 @layer base {
   :root {
-    /* Abyss Color Tokens (HSL values for opacity support) */
-    --abyss: 184 100% 10%;       /* #003135 */
-    --trench: 184 95% 16%;       /* #024950 */
-    --ember: 11 48% 40%;         /* #964734 */
-    --signal: 184 84% 37%;       /* #0FA4AF */
-    --mist: 188 56% 79%;         /* #AFDDE5 */
-    --foam: rgba(255, 255, 255, 0.05);
-    --foam-strong: rgba(255, 255, 255, 0.10);
+    /* Ledger Color Tokens (exact hexes as requested) */
+    --paper: 33 67% 90%;       /* #F8E7D4 */
+    --amber: 28 82% 71%;       /* #F0B27A */
+    --clay: 23 65% 55%;        /* #D77A3F */
+    --rust: 19 57% 38%;        /* #9A4E2A */
+    --ink: 15 38% 16%;         /* #3A221A */
+    
+    --frost: rgba(255, 255, 255, 0.55);
+    --frost-strong: rgba(255, 255, 255, 0.8);
 
     /* Text-on-color rules from thesis */
-    --text-on-ember: 14 83% 94%; /* #FDEDE8 */
-    --text-on-signal: 185 100% 8%; /* #00272B */
+    --text-on-paper: var(--ink);
+    --text-on-amber: var(--ink);
+    --text-on-clay: var(--paper);
+    --text-on-rust: var(--paper);
+    --text-on-ink: var(--paper);
 
-    /* Shadcn mappings (forcing dark mode default) */
-    --background: var(--abyss);
-    --foreground: var(--mist);
+    /* Shadcn mappings (forcing light mode) */
+    --background: var(--paper);
+    --foreground: var(--ink);
 
-    --card: var(--trench);
-    --card-foreground: var(--mist);
+    --card: var(--frost);
+    --card-foreground: var(--ink);
 
-    --popover: var(--trench);
-    --popover-foreground: var(--mist);
+    --popover: var(--paper);
+    --popover-foreground: var(--ink);
 
-    --primary: var(--signal);
-    --primary-foreground: var(--text-on-signal);
+    --primary: var(--clay);
+    --primary-foreground: var(--paper);
 
-    --secondary: var(--trench);
-    --secondary-foreground: var(--mist);
+    --secondary: var(--amber);
+    --secondary-foreground: var(--ink);
 
-    --muted: var(--trench);
-    --muted-foreground: var(--mist);
+    --muted: var(--amber);
+    --muted-foreground: var(--ink);
 
-    --accent: var(--trench);
-    --accent-foreground: var(--mist);
+    --accent: var(--clay);
+    --accent-foreground: var(--paper);
 
-    --destructive: var(--ember);
-    --destructive-foreground: var(--text-on-ember);
+    --destructive: var(--rust);
+    --destructive-foreground: var(--paper);
 
-    --border: var(--mist);
-    --input: var(--mist);
-    --ring: var(--signal);
+    --border: var(--ink);
+    --input: var(--ink);
+    --ring: var(--clay);
 
-    --radius: 0.5rem;
+    --radius: 0.25rem; /* minimal rounding for ledger feel */
   }
 }
 
 @layer base {
   body {
-    @apply bg-abyss text-mist font-sans;
+    @apply bg-paper text-ink font-sans;
   }
 }
 

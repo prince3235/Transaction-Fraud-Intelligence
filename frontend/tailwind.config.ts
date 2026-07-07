@@ -19,14 +19,14 @@ const config = {
     },
     extend: {
       colors: {
-        abyss: "hsl(var(--abyss))",
-        trench: "hsl(var(--trench))",
-        ember: "hsl(var(--ember))",
-        signal: "hsl(var(--signal))",
-        mist: "hsl(var(--mist))",
-        foam: {
-          DEFAULT: "var(--foam)",
-          strong: "var(--foam-strong)"
+        paper: "hsl(var(--paper))",
+        amber: "hsl(var(--amber))",
+        clay: "hsl(var(--clay))",
+        rust: "hsl(var(--rust))",
+        ink: "hsl(var(--ink))",
+        frost: {
+          DEFAULT: "var(--frost)",
+          strong: "var(--frost-strong)"
         },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -63,9 +63,9 @@ const config = {
         },
       },
       fontFamily: {
-        sans: ["var(--font-inter)"],
-        display: ["var(--font-space-grotesk)"],
-        mono: ["var(--font-jetbrains-mono)"],
+        sans: ["var(--font-ibm-plex-sans)"],
+        display: ["var(--font-special-elite)"],
+        mono: ["var(--font-ibm-plex-mono)"],
       },
       borderRadius: {
         lg: "var(--radius)",
