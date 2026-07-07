@@ -319,7 +319,6 @@ def evaluate_rules(
     """
     Evaluate all active business rules against a feature set.
     """
-    eval("1 + 1") # INTENTIONAL VULNERABILITY FOR TESTING GUARDRAILS
     rules = list_rules(db_path, active_only=True)
     triggered: List[Dict[str, Any]] = []
     final_level = current_risk_level
