@@ -9,7 +9,7 @@ export function GlassPanel({ className, as: Component = "div", ...props }: Glass
   return (
     <Component
       className={cn(
-        "bg-foam backdrop-blur-md border border-mist/10 rounded-xl",
+        "bg-frost backdrop-blur-md border border-ink/10 rounded-sm shadow-sm",
         className
       )}
       {...props}

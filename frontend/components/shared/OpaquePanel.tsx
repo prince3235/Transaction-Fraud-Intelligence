@@ -9,7 +9,7 @@ export function OpaquePanel({ className, as: Component = "div", ...props }: Opaq
   return (
     <Component
       className={cn(
-        "bg-trench border border-mist/20 rounded-xl",
+        "bg-frost border border-ink/12 rounded-sm shadow-[0_1px_3px_rgba(58,34,26,0.08)]",
         className
       )}
       {...props}
