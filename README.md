@@ -19,6 +19,21 @@ This platform bridges the gap between raw Machine Learning outputs and human Com
 *   **Role-Based Access Control (RBAC):** Secure access tiers (Admin, Analyst, Executive, Data Scientist).
 *   **Immutable Audit Logs:** Strict tracking of every action (status changes, model deployments, rule creation, and all LLM Copilot queries) for regulatory compliance.
 
+## Architecture
+- **Backend:** FastAPI, PostgreSQL, SQLAlchemy ORM, Alembic
+- **Frontend:** Next.js (The Abyss UI) & legacy Streamlit
+- **ML Layer:** Scikit-Learn (RandomForest), MLflow tracking
+- **CI/CD:** GitHub Actions for automated pytest and integration testing using Testcontainers
+
+## Local Development (With Docker)
+Since the application now runs on PostgreSQL, Docker is highly recommended.
+```bash
+docker compose up -d postgres
+alembic upgrade head
+python scripts/migrate_sqlite_to_pg.py
+uvicorn api.main:app --reload
+```
+
 ### 3. Analytics & Intelligence
 *   **Customer Risk 360:** Lazy-aggregated profiles showing lifetime risk scores, fraud flags, and mock device/location intelligence.
 *   **Executive Dashboard:** High-level KPIs measuring revenue saved (blocked fraud) vs potential loss (approved fraud), and SLA tracking.
