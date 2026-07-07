@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { GlassPanel } from "@/components/shared/GlassPanel"
 import { Button } from "@/components/ui/button"
 import { ShieldAlert, Send } from "lucide-react"
 
@@ -51,10 +50,10 @@ export function CopilotChat({ caseId, onEscalate }: CopilotChatProps) {
   }
 
   return (
-    <GlassPanel className="flex flex-col h-full overflow-hidden">
-      <div className="p-4 border-b border-mist/10 bg-foam-strong flex items-center gap-2">
-        <ShieldAlert className="w-4 h-4 text-signal" />
-        <span className="font-display text-sm font-medium text-mist">Analyst Copilot</span>
+    <div className="flex flex-col h-full overflow-hidden bg-frost border border-ink/12 rounded-sm shadow-[0_1px_3px_rgba(58,34,26,0.08)]">
+      <div className="p-4 border-b border-ink/10 bg-frost-strong flex items-center gap-2">
+        <ShieldAlert className="w-4 h-4 text-ink" />
+        <span className="font-display text-sm font-medium text-ink">Analyst Copilot</span>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -64,10 +63,10 @@ export function CopilotChat({ caseId, onEscalate }: CopilotChatProps) {
 
           return (
             <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[85%] rounded-lg p-3 text-sm font-sans ${
+              <div className={`max-w-[85%] rounded-md p-3 text-sm font-sans ${
                 msg.role === 'user' 
-                  ? 'bg-transparent text-mist text-right' 
-                  : 'bg-foam-strong text-mist/90'
+                  ? 'bg-paper border border-ink/15 text-ink' 
+                  : 'bg-frost-strong border border-ink/10 text-ink'
               }`}>
                 {cleanContent}
               </div>
@@ -75,7 +74,7 @@ export function CopilotChat({ caseId, onEscalate }: CopilotChatProps) {
               {hasEscalation && onEscalate && (
                 <button 
                   onClick={onEscalate}
-                  className="mt-2 text-[10px] font-medium bg-ember/20 text-text-on-ember px-2 py-1 rounded-full uppercase tracking-wide hover:bg-ember/40 transition-colors"
+                  className="mt-2 text-[10px] font-medium bg-rust/10 text-rust px-2 py-1 rounded-sm uppercase tracking-wide border border-rust/20 hover:bg-rust/20 transition-colors"
                 >
                   Action: Escalate Case
                 </button>
@@ -85,24 +84,24 @@ export function CopilotChat({ caseId, onEscalate }: CopilotChatProps) {
         })}
       </div>
 
-      <form onSubmit={handleSubmit} className="p-3 border-t border-mist/10 bg-foam">
+      <form onSubmit={handleSubmit} className="p-3 border-t border-ink/10 bg-frost">
         <div className="relative flex items-center">
           <input
             type="text"
             value={input}
             onChange={e => setInput(e.target.value)}
             placeholder="Ask about this alert..."
-            className="w-full bg-abyss/50 border border-mist/20 rounded-md pl-3 pr-10 py-2 text-sm text-mist focus:outline-none focus:border-signal transition-colors"
+            className="w-full bg-paper border border-ink/20 rounded-md pl-3 pr-10 py-2 text-sm text-ink focus:outline-none focus:border-clay transition-colors"
           />
           <button 
             type="submit" 
             disabled={!input.trim() || isStreaming}
-            className="absolute right-2 p-1 text-mist/60 hover:text-signal disabled:opacity-50"
+            className="absolute right-2 p-1 text-ink/60 hover:text-clay disabled:opacity-50"
           >
             <Send className="w-4 h-4" />
           </button>
         </div>
       </form>
-    </GlassPanel>
+    </div>
   )
 }

@@ -14,17 +14,17 @@ export function RiskBadge({ level, size = 'sm', className, ...props }: RiskBadge
   };
 
   const colorClasses = {
-    high: 'bg-ember text-[var(--text-on-ember)]',
-    medium: 'bg-signal text-[var(--text-on-signal)]',
-    low: 'bg-mist text-trench'
+    high: 'bg-rust text-paper',
+    medium: 'bg-clay text-paper',
+    low: 'bg-amber text-ink'
   };
 
-  const label = level.charAt(0).toUpperCase() + level.slice(1);
+  const label = level; // handled by uppercase class
 
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center font-medium rounded-full uppercase tracking-wider",
+        "inline-flex items-center justify-center font-mono font-medium rounded-sm border border-ink/20 uppercase tracking-[0.05em]",
         sizeClasses[size],
         colorClasses[level],
         className

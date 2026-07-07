@@ -1,4 +1,3 @@
-import { OpaquePanel } from "./OpaquePanel";
 import { cn } from "@/lib/utils";
 
 interface StatCardProps {
@@ -15,9 +14,9 @@ export function StatCard({ label, value, trend, tone = 'default', className }: S
   const isNegativeTrend = trend !== undefined && trend < 0;
 
   return (
-    <OpaquePanel className={cn("p-4 flex flex-col justify-between h-full min-w-[200px]", className)}>
+    <div className={cn("p-4 flex flex-col justify-between h-full min-w-[200px] bg-frost border border-ink/12 rounded-sm shadow-[0_1px_3px_rgba(58,34,26,0.08)]", className)}>
       <div className="flex justify-between items-start mb-2">
-        <span className="text-[12px] font-sans text-mist/70 tracking-wide uppercase">
+        <span className="text-[12px] font-sans text-ink/65 tracking-wide uppercase">
           {label}
         </span>
         {trend !== undefined && (
@@ -25,21 +24,21 @@ export function StatCard({ label, value, trend, tone = 'default', className }: S
             className={cn(
               "text-[10px] font-mono px-1.5 py-0.5 rounded-sm flex items-center",
               isDanger 
-                ? "bg-ember/20 text-text-on-ember"
+                ? "bg-rust/20 text-rust"
                 : isPositiveTrend 
-                  ? "bg-signal/20 text-signal" 
+                  ? "bg-ink/10 text-ink" 
                   : isNegativeTrend 
-                    ? "bg-ember/20 text-ember" 
-                    : "bg-mist/10 text-mist"
+                    ? "bg-rust/10 text-rust" 
+                    : "bg-ink/10 text-ink"
             )}
           >
             {trend > 0 ? "+" : ""}{trend}%
           </span>
         )}
       </div>
-      <div className={cn("font-display text-[24px] font-medium leading-none", isDanger ? "text-ember" : "text-mist")}>
+      <div className={cn("font-display text-[28px] font-medium leading-none text-ink")}>
         {value}
       </div>
-    </OpaquePanel>
+    </div>
   );
 }
