@@ -7,16 +7,40 @@ from src.models import Base
 
 @pytest.fixture(scope="session")
 def postgres_container():
-    """Start a Postgres container for the test session."""
-    with PostgresContainer("postgres:16-alpine") as postgres:
-        # Override the DATABASE_URL env var for the application
-        os.environ["DATABASE_URL"] = postgres.get_connection_url()
-        yield postgres
+    """Start a Postgres container for the test session if Docker is available and not in CI."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # In GitHub Actions, we use the service container defined in the workflow
+        # The DATABASE_URL is already provided via env var.
+        yield None
+        return
+        
+    try:
+        container = PostgresContainer("postgres:16-alpine")
+        container.start()
+        os.environ["DATABASE_URL"] = container.get_connection_url()
+        yield container
+        container.stop()
+    except Exception as e:
+        # Docker not available, fallback to SQLite
+        os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+        yield None
 
 @pytest.fixture(scope="session")
 def engine(postgres_container):
-    """Create a SQLAlchemy engine connected to the test container."""
-    engine = create_engine(postgres_container.get_connection_url())
+    """Create a SQLAlchemy engine connected to the test container or SQLite fallback."""
+    # postgres_container will be None if in CI or if Docker is unavailable.
+    db_url = os.environ.get("DATABASE_URL")
+    
+    if db_url and not db_url.startswith("sqlite"):
+        engine = create_engine(db_url)
+    else:
+        from sqlalchemy.pool import StaticPool
+        engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        
     # Create all tables in the test database
     Base.metadata.create_all(bind=engine)
     yield engine

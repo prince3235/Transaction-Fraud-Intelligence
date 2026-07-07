@@ -1,0 +1,12 @@
+{
+  "name": "Fraud Intelligence Platform",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "api",
+  "workspaceFolder": "/workspace",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/node:1": {}
+  },
+  "forwardPorts": [3000, 8000, 5000, 8501, 5432],
+  "postCreateCommand": "pip install -r requirements.txt && cd frontend && npm install"
+}
