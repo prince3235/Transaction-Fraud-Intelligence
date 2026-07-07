@@ -2,9 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Shield, Activity, Bell, FileText, Database, ShieldAlert, FileBarChart, PlayCircle, LogOut } from "lucide-react"
+import { BookOpen, Activity, Bell, FileText, Database, ShieldAlert, FileBarChart, PlayCircle, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { GlassPanel } from "@/components/shared/GlassPanel"
 import { useStore, useRole } from "@/store"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
@@ -25,10 +24,10 @@ export function Sidebar() {
   const setUser = useStore((state) => state.setUser)
 
   return (
-    <GlassPanel as="aside" className="w-[240px] flex-shrink-0 flex flex-col h-screen rounded-none border-t-0 border-b-0 border-l-0">
+    <aside className="w-[240px] flex-shrink-0 flex flex-col h-screen rounded-none bg-ink text-paper border-r border-ink/10">
       <div className="p-6 flex items-center gap-3">
-        <Shield className="w-6 h-6 text-signal" />
-        <span className="font-display font-medium text-lg text-mist tracking-tight">The Abyss</span>
+        <BookOpen className="w-6 h-6 text-paper" />
+        <span className="font-display font-medium text-lg text-paper tracking-tight">The Ledger</span>
       </div>
 
       <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
@@ -44,8 +43,8 @@ export function Sidebar() {
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg font-sans text-sm transition-all duration-150",
                 isActive 
-                  ? "bg-signal text-[var(--text-on-signal)] font-medium" 
-                  : "text-mist/60 hover:text-mist hover:bg-foam-strong"
+                  ? "bg-clay text-paper font-medium" 
+                  : "text-paper/60 hover:text-paper hover:bg-clay/20"
               )}
             >
               <item.icon className="w-4 h-4" />
@@ -56,19 +55,19 @@ export function Sidebar() {
       </nav>
 
       {user && (
-        <div className="p-4 mt-auto border-t border-mist/10">
+        <div className="p-4 mt-auto border-t border-paper/10">
           <div className="flex items-center gap-3">
-            <Avatar className="h-9 w-9 bg-signal text-text-on-signal">
+            <Avatar className="h-9 w-9 bg-clay text-paper">
               <AvatarImage src={user.avatar_url} />
-              <AvatarFallback className="bg-signal text-text-on-signal">{user.name.charAt(0)}</AvatarFallback>
+              <AvatarFallback className="bg-clay text-paper">{user.name.charAt(0)}</AvatarFallback>
             </Avatar>
             <div className="flex flex-col flex-1 min-w-0">
-              <span className="text-sm font-medium text-mist truncate">{user.name}</span>
-              <span className="text-[10px] text-mist/60 truncate">{user.role}</span>
+              <span className="text-sm font-medium text-paper truncate">{user.name}</span>
+              <span className="text-[10px] text-paper/60 truncate">{user.role}</span>
             </div>
             <button 
               onClick={() => setUser(null)}
-              className="p-1.5 text-mist/60 hover:text-mist hover:bg-foam-strong rounded-md transition-colors"
+              className="p-1.5 text-paper/60 hover:text-paper hover:bg-clay/20 rounded-md transition-colors"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
@@ -76,6 +75,6 @@ export function Sidebar() {
           </div>
         </div>
       )}
-    </GlassPanel>
+    </aside>
   )
 }

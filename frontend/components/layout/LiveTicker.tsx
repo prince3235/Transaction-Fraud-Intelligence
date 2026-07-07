@@ -26,45 +26,48 @@ export function LiveTicker() {
   const tickerItems = alerts?.slice(0, 15) || [];
   
   if (tickerItems.length === 0) {
-    return <div className="flex-1 flex justify-center text-xs font-mono text-mist/40">Waiting for signals...</div>;
+    return <div className="flex-1 flex justify-center text-xs font-mono text-ink/40">Waiting for signals...</div>;
   }
+
+  const getStatusDisplay = (item: PredictionLog) => {
+    const isFlagged = item.status === 'PENDING_REVIEW' && item.risk_level === 'high';
+    const text = isFlagged ? 'FLAGGED' : item.status;
+    const colorClass = isFlagged ? 'text-rust' : item.status === 'PENDING_REVIEW' ? 'text-clay' : 'text-ink/70';
+    return { text, colorClass };
+  };
 
   return (
     <div className="flex-1 overflow-hidden mx-8 relative flex items-center h-6 group">
       {/* Masking gradients */}
-      <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-abyss to-transparent z-10 pointer-events-none" />
-      <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-abyss to-transparent z-10 pointer-events-none" />
+      <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-paper to-transparent z-10 pointer-events-none" />
+      <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-paper to-transparent z-10 pointer-events-none" />
       
       <div className="flex whitespace-nowrap animate-marquee group-hover:[animation-play-state:paused]">
-        {tickerItems.map((item, idx) => (
-          <span key={item.id + idx} className="inline-flex items-center text-xs font-mono text-mist/70 mx-4">
-            {item.transaction_id} <span className="mx-2 text-mist/30">·</span> 
-            ${item.amount.toFixed(2)} <span className="mx-2 text-mist/30">·</span>
-            <span className={cn(
-              "font-medium",
-              item.status === 'APPROVED' ? 'text-signal' : 
-              item.status === 'REJECTED' || item.risk_level === 'high' ? 'text-ember' : 
-              'text-mist/70'
-            )}>
-              {item.status === 'PENDING_REVIEW' && item.risk_level === 'high' ? 'FLAGGED' : item.status}
+        {tickerItems.map((item, idx) => {
+          const { text, colorClass } = getStatusDisplay(item);
+          return (
+            <span key={item.id + idx} className="inline-flex items-center text-xs font-mono text-ink mx-4">
+              {item.transaction_id} <span className="mx-2 text-ink/30">·</span> 
+              ${item.amount.toFixed(2)} <span className="mx-2 text-ink/30">·</span>
+              <span className={cn("font-medium", colorClass)}>
+                {text}
+              </span>
             </span>
-          </span>
-        ))}
+          )
+        })}
         {/* Duplicate for seamless looping */}
-        {tickerItems.map((item, idx) => (
-          <span key={`dup-${item.id}-${idx}`} className="inline-flex items-center text-xs font-mono text-mist/70 mx-4">
-            {item.transaction_id} <span className="mx-2 text-mist/30">·</span> 
-            ${item.amount.toFixed(2)} <span className="mx-2 text-mist/30">·</span>
-            <span className={cn(
-              "font-medium",
-              item.status === 'APPROVED' ? 'text-signal' : 
-              item.status === 'REJECTED' || item.risk_level === 'high' ? 'text-ember' : 
-              'text-mist/70'
-            )}>
-              {item.status === 'PENDING_REVIEW' && item.risk_level === 'high' ? 'FLAGGED' : item.status}
+        {tickerItems.map((item, idx) => {
+          const { text, colorClass } = getStatusDisplay(item);
+          return (
+            <span key={`dup-${item.id}-${idx}`} className="inline-flex items-center text-xs font-mono text-ink mx-4">
+              {item.transaction_id} <span className="mx-2 text-ink/30">·</span> 
+              ${item.amount.toFixed(2)} <span className="mx-2 text-ink/30">·</span>
+              <span className={cn("font-medium", colorClass)}>
+                {text}
+              </span>
             </span>
-          </span>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

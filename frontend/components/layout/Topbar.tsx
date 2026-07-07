@@ -1,7 +1,6 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { GlassPanel } from "@/components/shared/GlassPanel"
 import { LiveTicker } from "./LiveTicker"
 import { Bell, Wifi, WifiOff, Loader2 } from "lucide-react"
 import { useStore } from "@/store"
@@ -28,9 +27,9 @@ export function Topbar() {
   const pendingHighRiskCount = alerts?.filter(a => a.status === 'PENDING_REVIEW' && a.risk_level === 'high').length || 0
 
   return (
-    <GlassPanel as="header" className="h-16 flex-shrink-0 flex items-center justify-between px-6 rounded-none border-t-0 border-r-0 border-l-0 sticky top-0 z-40">
+    <header className="h-16 flex-shrink-0 flex items-center justify-between px-6 border-b border-ink/10 sticky top-0 z-40 bg-frost backdrop-blur-md">
       <div className="flex items-center min-w-[200px]">
-        <h1 className="font-display text-[18px] font-medium text-mist">{pageTitle}</h1>
+        <h1 className="font-display text-[18px] font-medium text-ink">{pageTitle}</h1>
       </div>
 
       <LiveTicker />
@@ -38,21 +37,21 @@ export function Topbar() {
       <div className="flex items-center gap-4 min-w-[200px] justify-end">
         
         {/* WS Status Indicator */}
-        <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-trench" title={`WebSocket Status: ${wsStatus}`}>
-          {wsStatus === 'connected' && <Wifi className="w-3.5 h-3.5 text-signal" />}
-          {wsStatus === 'reconnecting' && <Loader2 className="w-3.5 h-3.5 text-mist/70 animate-spin" />}
-          {wsStatus === 'disconnected' && <WifiOff className="w-3.5 h-3.5 text-mist/50" />}
-          <span className="text-[10px] font-medium text-mist/70 uppercase tracking-wider">{wsStatus}</span>
+        <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-paper border border-ink/20" title={`WebSocket Status: ${wsStatus}`}>
+          {wsStatus === 'connected' && <Wifi className="w-3.5 h-3.5 text-clay" />}
+          {wsStatus === 'reconnecting' && <Loader2 className="w-3.5 h-3.5 text-ink/70 animate-spin" />}
+          {wsStatus === 'disconnected' && <WifiOff className="w-3.5 h-3.5 text-ink/50" />}
+          <span className="text-[10px] font-medium text-ink/70 uppercase tracking-wider">{wsStatus}</span>
         </div>
 
         {/* Notifications */}
         <div className="relative p-2">
-          <Bell className="w-5 h-5 text-mist" />
+          <Bell className="w-5 h-5 text-ink" />
           {pendingHighRiskCount > 0 && (
-            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-ember ring-2 ring-abyss" />
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rust ring-2 ring-paper" />
           )}
         </div>
       </div>
-    </GlassPanel>
+    </header>
   )
 }
