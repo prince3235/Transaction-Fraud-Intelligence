@@ -197,7 +197,7 @@ Provide a clear, plain-English explanation (2-5 sentences) of why this transacti
 
 
 # ── Database helpers ──────────────────────────────────────────────────────────
-from src.db import SessionLocal
+import src.db
 from src.models import FraudCase, PredictionLog, CopilotLog
 
 def _fetch_case_context(
@@ -206,7 +206,7 @@ def _fetch_case_context(
     case_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Fetch all relevant context from DB for a given log or case."""
-    db = SessionLocal()
+    db = src.db.SessionLocal()
     try:
         if case_id:
             case = db.query(FraudCase).filter(FraudCase.case_id == case_id).first()
@@ -275,7 +275,7 @@ def _log_copilot_query(
 ) -> None:
     """Write every copilot query + response to copilot_logs for compliance audit."""
     try:
-        db = SessionLocal()
+        db = src.db.SessionLocal()
         try:
             log = CopilotLog(
                 case_id=case_id,
