@@ -1,5 +1,6 @@
 import streamlit as st
 import sys
+import html as html_lib
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,13 @@ for rule in rules:
     status_color = "#00E676" if rule["is_active"] else "#FF2D55"
     status_text = "ACTIVE" if rule["is_active"] else "DISABLED"
     opacity = "1.0" if rule["is_active"] else "0.5"
+    # HTML-escape all user-controlled fields before rendering
+    name_e = html_lib.escape(str(rule['name']), quote=True)
+    desc_e = html_lib.escape(str(rule['description']), quote=True)
+    rtype_e = html_lib.escape(str(rule['rule_type']), quote=True)
+    action_e = html_lib.escape(str(rule['action']), quote=True)
+    bump_e = html_lib.escape(str(rule['risk_level_bump']), quote=True)
+    cond_e = html_lib.escape(str(rule['condition_json']), quote=True)
     
     with st.container():
         st.markdown(f"""
@@ -52,17 +60,17 @@ for rule in rules:
             <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                 <div>
                     <div style="font-size:18px;font-weight:800;color:#E8F0FF;margin-bottom:5px;">
-                        {rule['name']}
+                        {name_e}
                     </div>
                     <div style="font-size:13px;color:#BAC4D0;margin-bottom:15px;">
-                        {rule['description']}
+                        {desc_e}
                     </div>
                     <div style="display:flex;gap:15px;font-size:12px;">
                         <div style="background:rgba(255,255,255,0.05);padding:4px 10px;border-radius:4px;">
-                            <span style="color:#8899AA;">Type:</span> <span style="color:#E8F0FF;font-weight:700;">{rule['rule_type']}</span>
+                            <span style="color:#8899AA;">Type:</span> <span style="color:#E8F0FF;font-weight:700;">{rtype_e}</span>
                         </div>
                         <div style="background:rgba(255,255,255,0.05);padding:4px 10px;border-radius:4px;">
-                            <span style="color:#8899AA;">Action:</span> <span style="color:#E8F0FF;font-weight:700;">{rule['action']} to {rule['risk_level_bump']}</span>
+                            <span style="color:#8899AA;">Action:</span> <span style="color:#E8F0FF;font-weight:700;">{action_e} to {bump_e}</span>
                         </div>
                         <div style="background:rgba(255,255,255,0.05);padding:4px 10px;border-radius:4px;">
                             <span style="color:#8899AA;">Priority:</span> <span style="color:#00B4FF;font-weight:700;">{rule['priority']}</span>
@@ -83,7 +91,7 @@ for rule in rules:
             
             <div style="margin-top:15px;background:rgba(0,0,0,0.3);padding:10px;border-radius:6px;
                         font-family:monospace;font-size:12px;color:#00B4FF;">
-                {rule['condition_json']}
+                {cond_e}
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -117,22 +125,29 @@ if st.session_state.get("show_rule_form", False):
             
         r_priority = st.slider("Priority (100 = Highest)", min_value=1, max_value=100, value=50)
         
-        r_cond = st.text_area("Condition JSON", value='{"field": "amount", "operator": ">", "threshold": 100000}')
+        r_cond = st.text_area(
+            "Condition Expression (simpleeval syntax)",
+            value='amount > 100000',
+            help="Use simpleeval syntax. Available vars: amount, type_encoded, type_risk_score, log_amount, balance_error_orig, balance_error_dest, amount_to_oldbalance_orig_ratio, sender_account_emptied, dest_received_large_amount, is_large_transaction, is_high_velocity_step, suspicious_signal_count, transactions_in_step, step_bucket, ...",
+        )
         
         submitted = st.form_submit_button("💾 Save Rule", type="primary")
         if submitted:
-            try:
-                cond_dict = json.loads(r_cond)
-                if not r_name.strip():
-                    st.error("Rule name is required.")
-                else:
-                    create_rule(DB_PATH, r_name, r_desc, r_type, cond_dict, r_action, r_bump, r_priority)
-                    log_audit_event(DB_PATH, user["username"], "Rule Created", "business_rule", r_name)
+            if not r_name.strip():
+                st.error("Rule name is required.")
+            else:
+                try:
+                    # Pass the condition as a STRING expression, not a parsed dict.
+                    # The storage column (condition_json) stores simpleeval source code.
+                    create_rule(DB_PATH, r_name.strip(), r_desc, r_type, r_cond, r_action, r_bump, r_priority)
+                    log_audit_event(DB_PATH, user["username"], "Rule Created", "business_rule", r_name.strip())
                     st.success("Rule created successfully!")
                     st.session_state.show_rule_form = False
                     st.rerun()
-            except json.JSONDecodeError:
-                st.error("Invalid JSON in condition field.")
+                except ValueError as e:
+                    st.error(f"Invalid rule: {e}")
+                except Exception as e:
+                    st.error(f"Failed to create rule: {e}")
     
     if st.button("Cancel"):
         st.session_state.show_rule_form = False

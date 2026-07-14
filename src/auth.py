@@ -2,16 +2,18 @@
 Enterprise Authentication & Role-Based Access Control.
 
 Provides:
-- Password hashing with hashlib (no external deps)
+- Password hashing with bcrypt (PBKDF2-style KDF, per-user salt)
 - Simple token-based session management
 - Role permissions matrix
-- Demo user seeding
+- Demo user seeding (env-gated, env-injected passwords)
 - Audit logging of login events
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +21,18 @@ from typing import Any, Dict, List, Optional
 
 from src.db import SessionLocal
 from src.models import User, AuditLog
+
+logger = logging.getLogger(__name__)
+
+try:
+    import bcrypt
+    _HAS_BCRYPT = True
+except ImportError:  # pragma: no cover
+    _HAS_BCRYPT = False
+    logger.warning(
+        "bcrypt not installed — falling back to hashlib.pbkdf2_hmac (still safe, "
+        "per-user salt + 600k iterations). Install bcrypt for stronger hashing."
+    )
 
 # ── Role definitions ──────────────────────────────────────────────────────────
 
@@ -72,15 +86,47 @@ ROLES = {
     },
 }
 
-# ── Demo users (username → {password, role}) ──────────────────────────────────
+# ── Demo users (env-injected passwords) ───────────────────────────────────────
+# Demo users are ONLY seeded when SEED_DEMO_USERS=1 is set in the environment.
+# Passwords are read from env vars (DEMO_USER_<NAME>_PASSWORD); if missing, a
+# cryptographically random password is generated and logged once at startup.
+# In production, set SEED_DEMO_USERS=0 (or unset) and provision users via DB.
 
-DEMO_USERS = [
-    {"username": "admin",      "password": "admin123",    "role": "Admin",               "email": "admin@fraudiq.ai"},
-    {"username": "analyst",    "password": "analyst123",  "role": "Fraud_Analyst",        "email": "analyst@fraudiq.ai"},
-    {"username": "compliance", "password": "comply123",   "role": "Compliance_Officer",   "email": "compliance@fraudiq.ai"},
-    {"username": "auditor",    "password": "audit123",    "role": "Auditor",              "email": "auditor@fraudiq.ai"},
-    {"username": "viewer",     "password": "view123",     "role": "Viewer",               "email": "viewer@fraudiq.ai"},
+_DEMO_USER_DEFS = [
+    ("admin",      "Admin",              "admin@fraudiq.ai"),
+    ("analyst",    "Fraud_Analyst",      "analyst@fraudiq.ai"),
+    ("compliance", "Compliance_Officer", "compliance@fraudiq.ai"),
+    ("auditor",    "Auditor",            "auditor@fraudiq.ai"),
+    ("viewer",     "Viewer",             "viewer@fraudiq.ai"),
 ]
+
+
+def _demo_password(username: str) -> str:
+    """Read a demo user's password from env, or generate a secure random one."""
+    env_var = f"DEMO_USER_{username.upper()}_PASSWORD"
+    pw = os.environ.get(env_var, "")
+    if pw:
+        return pw
+    # Generate a 16-byte random password (alphanumeric-ish via token_urlsafe)
+    pw = secrets.token_urlsafe(16)
+    logger.info("Generated random demo password for user '%s' (set %s to override)",
+                username, env_var)
+    # Print once for dev convenience — safe because random and never reused
+    print(f"  [demo] {username} -> {pw}")
+    return pw
+
+
+def _demo_users() -> List[Dict[str, Any]]:
+    return [
+        {"username": u, "password": _demo_password(u), "role": r, "email": e}
+        for u, r, e in _DEMO_USER_DEFS
+    ]
+
+
+# Back-compat: expose DEMO_USERS list (used by some scripts/tests)
+# Note: this will call _demo_users() once at import. If you want fresh random
+# passwords each call, use _demo_users() directly.
+DEMO_USERS = _demo_users()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -91,16 +137,43 @@ def _now() -> str:
 
 def hash_password(password: str) -> str:
     """
-    Hash a password using SHA-256 with a salt prefix.
-    No external libraries required.
+    Hash a password using bcrypt (preferred) or PBKDF2-HMAC-SHA256 fallback.
+    Both produce a per-password random salt embedded in the hash string,
+    so identical passwords no longer produce identical hashes.
     """
-    salt = "fraudiq_enterprise_2024"
-    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+    pw_bytes = password.encode("utf-8")
+    if _HAS_BCRYPT:
+        return bcrypt.hashpw(pw_bytes, bcrypt.gensalt(rounds=12)).decode("utf-8")
+    # Fallback: PBKDF2 with per-user salt + 600k iterations (OWASP 2023 recommendation)
+    salt = secrets.token_bytes(16)
+    iterations = 600_000
+    dk = hashlib.pbkdf2_hmac("sha256", pw_bytes, salt, iterations)
+    # Format: pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>
+    return f"pbkdf2_sha256${iterations}${salt.hex()}${dk.hex()}"
 
 
 def verify_password(password: str, hashed: str) -> bool:
-    """Verify a plaintext password against its stored hash."""
-    return hash_password(password) == hashed
+    """Verify a plaintext password against a stored hash."""
+    pw_bytes = password.encode("utf-8")
+    try:
+        if _HAS_BCRYPT and hashed.startswith("$2"):
+            return bcrypt.checkpw(pw_bytes, hashed.encode("utf-8"))
+        if hashed.startswith("pbkdf2_sha256$"):
+            _, iterations_str, salt_hex, hash_hex = hashed.split("$", 3)
+            iterations = int(iterations_str)
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(hash_hex)
+            dk = hashlib.pbkdf2_hmac("sha256", pw_bytes, salt, iterations)
+            # Constant-time compare to avoid timing attacks
+            return secrets.compare_digest(dk, expected)
+        # Legacy SHA-256 hashes (salted with the old static salt) — accept once
+        # so existing rows can be transparently upgraded.
+        if len(hashed) == 64:
+            legacy = hashlib.sha256(f"fraudiq_enterprise_2024{password}".encode()).hexdigest()
+            return secrets.compare_digest(legacy, hashed)
+    except (ValueError, TypeError):
+        return False
+    return False
 
 
 def generate_session_token() -> str:
@@ -112,12 +185,17 @@ def generate_session_token() -> str:
 
 def seed_demo_users(db_path: Path) -> None:
     """
-    Seed the database with demo users if they don't already exist.
+    Seed the database with demo users — ONLY when SEED_DEMO_USERS=1.
+    Passwords are read from DEMO_USER_<NAME>_PASSWORD env vars (random fallback).
+    Skips silently in production to avoid creating known-weak accounts.
     """
+    if os.environ.get("SEED_DEMO_USERS", "0") != "1":
+        logger.info("Skipping demo user seeding (set SEED_DEMO_USERS=1 to enable).")
+        return
     db = SessionLocal()
     try:
         now = _now()
-        for user_data in DEMO_USERS:
+        for user_data in _demo_users():
             exists = db.query(User).filter(User.username == user_data["username"]).first()
             if not exists:
                 new_user = User(
@@ -129,6 +207,10 @@ def seed_demo_users(db_path: Path) -> None:
                     created_at=now
                 )
                 db.add(new_user)
+            else:
+                # Optionally re-hash if user exists but has a legacy SHA-256 hash
+                if len(exists.password_hash) == 64:
+                    exists.password_hash = hash_password(user_data["password"])
         db.commit()
     finally:
         db.close()

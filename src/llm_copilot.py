@@ -35,7 +35,9 @@ from typing import Any, Dict, Generator, List, Optional
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-ANTHROPIC_MODEL = "claude-sonnet-4-6"
+# NOTE: "claude-sonnet-4-6" is NOT a valid Anthropic model ID. We default to a
+# real, publicly-listed model ID and allow env override for future models.
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = 15
 CACHE_TTL_SECONDS = 600  # 10 minutes

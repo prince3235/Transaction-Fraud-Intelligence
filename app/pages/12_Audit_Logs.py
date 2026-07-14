@@ -1,5 +1,7 @@
 import streamlit as st
 import sys
+import html as html_lib
+import json
 from pathlib import Path
 import sqlite3
 import pandas as pd
@@ -11,6 +13,20 @@ from app.premium_design import inject_premium_design
 from app.auth_guard import require_auth, display_user_profile
 from app.utils_dashboard import get_db_path
 from src.auth import fetch_audit_logs, log_audit_event
+
+
+def _safe_render(value) -> str:
+    """HTML-safe string rendering for any value coming from the DB."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            value = json.dumps(value, indent=2, default=str)
+        except (TypeError, ValueError):
+            value = str(value)
+    else:
+        value = str(value)
+    return html_lib.escape(value, quote=True)
 
 st.set_page_config(page_title="Audit Logs", page_icon="📜", layout="wide")
 inject_premium_design()
@@ -58,12 +74,17 @@ for log in logs:
     elif "Updated" in log["action"] or "Toggled" in log["action"]: action_color = "#FF8A00"
     
     entity = f"{log['entity_type']} ({log['entity_id']})" if log['entity_id'] else str(log['entity_type'])
+    entity = html_lib.escape(str(entity), quote=True)
+    username = html_lib.escape(str(log['username']), quote=True)
+    action_rendered = html_lib.escape(str(log['action']), quote=True)
+    ip_rendered = html_lib.escape(str(log['ip_address']), quote=True)
+    reason_rendered = html_lib.escape(str(log.get('reason') or ''), quote=True)
     
     with st.expander(f"{log['timestamp'][:19].replace('T', ' ')} — {log['username']} : {log['action']} ({entity})"):
         st.markdown(f"""
         <div style="background:rgba(0,0,0,0.2);padding:15px;border-radius:8px;font-family:DM Mono,monospace;font-size:12px;color:#BAC4D0;">
-            <div style="margin-bottom:5px;"><span style="color:#8899AA;">Actor:</span> {log['username']} (IP: {log['ip_address']})</div>
-            <div style="margin-bottom:5px;"><span style="color:#8899AA;">Action:</span> <span style="color:{action_color};font-weight:700;">{log['action']}</span></div>
+            <div style="margin-bottom:5px;"><span style="color:#8899AA;">Actor:</span> {username} (IP: {ip_rendered})</div>
+            <div style="margin-bottom:5px;"><span style="color:#8899AA;">Action:</span> <span style="color:{action_color};font-weight:700;">{action_rendered}</span></div>
             <div style="margin-bottom:5px;"><span style="color:#8899AA;">Entity:</span> {entity}</div>
         """, unsafe_allow_html=True)
         
@@ -74,7 +95,7 @@ for log in logs:
                 st.markdown(f"""
                 <div style="flex:1;">
                     <div style="color:#FF2D55;margin-bottom:5px;">Previous Value</div>
-                    <div style="background:rgba(255,45,85,0.05);padding:10px;border-radius:4px;word-break:break-all;">{log['old_value_json']}</div>
+                    <div style="background:rgba(255,45,85,0.05);padding:10px;border-radius:4px;word-break:break-all;">{_safe_render(log['old_value_json'])}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -82,13 +103,13 @@ for log in logs:
                 st.markdown(f"""
                 <div style="flex:1;">
                     <div style="color:#00E676;margin-bottom:5px;">New Value</div>
-                    <div style="background:rgba(0,230,118,0.05);padding:10px;border-radius:4px;word-break:break-all;">{log['new_value_json']}</div>
+                    <div style="background:rgba(0,230,118,0.05);padding:10px;border-radius:4px;word-break:break-all;">{_safe_render(log['new_value_json'])}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
             st.markdown('</div>', unsafe_allow_html=True)
             
         if log.get("reason"):
-            st.markdown(f'<div style="margin-top:10px;color:#FF8A00;">Reason: {log["reason"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="margin-top:10px;color:#FF8A00;">Reason: {reason_rendered}</div>', unsafe_allow_html=True)
             
         st.markdown('</div>', unsafe_allow_html=True)

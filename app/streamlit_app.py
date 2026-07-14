@@ -8,10 +8,10 @@ st.set_page_config(page_title="Transaction Fraud Intelligence", layout="centered
 st.title("Transaction Fraud Intelligence System")
 
 MODEL_PATH = "models/best_fraud_model.pkl"
-CONFIG_PATH = "models/feature_config.json"
 
 model = joblib.load(MODEL_PATH)
-config = load_feature_config(CONFIG_PATH)
+# load_feature_config() takes no args — it locates the config via __file__.
+config = load_feature_config()
 
 st.subheader("Enter a Transaction")
 

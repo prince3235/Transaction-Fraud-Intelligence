@@ -134,7 +134,8 @@ with c2:
     """, unsafe_allow_html=True)
     
     if st.button("🚀 Trigger Model Retraining Pipeline", type="primary", use_container_width=True):
-        if not __import__("src.auth", fromlist=["has_permission"]).has_permission(st.session_state.user["role"], "retrain_model"):
+        from src.auth import has_permission
+        if not has_permission(st.session_state.user["role"], "retrain_model"):
             st.error("Access Denied: Requires 'retrain_model' permission.")
         else:
             progress_bar = st.progress(0)

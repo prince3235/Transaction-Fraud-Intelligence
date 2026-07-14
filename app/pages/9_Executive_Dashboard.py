@@ -1,11 +1,27 @@
 import streamlit as st
 import sys
+import json
 from pathlib import Path
 import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
+
+
+def _safe_get_amount(tx_value):
+    """Safely extract `amount` from a transaction_json cell.
+    Handles: dict (PG JSONB), str (SQLite TEXT), None, malformed JSON."""
+    if tx_value is None:
+        return 0.0
+    if isinstance(tx_value, dict):
+        return float(tx_value.get("amount", 0) or 0)
+    if isinstance(tx_value, str):
+        try:
+            return float(json.loads(tx_value).get("amount", 0) or 0)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return 0.0
+    return 0.0
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -41,7 +57,7 @@ def fetch_kpis():
     if df.empty:
         return None
         
-    df['amount'] = df['transaction_json'].apply(lambda x: float(eval(x).get('amount', 0)) if isinstance(x, str) else 0)
+    df['amount'] = df['transaction_json'].apply(lambda x: float(_safe_get_amount(x)))
     df['date'] = pd.to_datetime(df['created_at']).dt.date
     
     total_vol = df['amount'].sum()

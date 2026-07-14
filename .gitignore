@@ -1,6 +1,87 @@
+# ── Secrets / env ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── Virtualenvs ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Testing / coverage ───────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ── IDEs ──────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ── Data / model artifacts (tracked via DVC) ─────────────────
 transaction_data.csv
+transaction_data.zip
 *.csv
-.ipynb_checkpoints/
+!tests/*.csv
 data/raw/
 data/app_db/
-/transaction_data.zip
+data/processed/
+models/*.pkl
+!models/*.pkl.dvc
+mlruns/
+mlflow.db
+mlflow_artifacts/
+
+# ── Notebooks ────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Frontend ─────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.env*.local
+
+# ── Misc / junk ──────────────────────────────────────────────
+*.log
+*.bak
+*.tmp
+*.tmp.*
+untitled*.txt

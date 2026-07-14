@@ -9,7 +9,7 @@ from app.premium_design import inject_premium_design
 from app.auth_guard import require_auth, display_user_profile
 from app.utils_dashboard import get_db_path
 from src.model_registry import list_model_versions, promote_model, archive_model
-from src.auth import log_audit_event
+from src.auth import log_audit_event, has_permission
 import pandas as pd
 
 st.set_page_config(page_title="Model Registry", page_icon="📦", layout="wide")

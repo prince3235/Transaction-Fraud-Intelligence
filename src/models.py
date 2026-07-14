@@ -157,7 +157,7 @@ class CopilotLog(Base):
     prediction_log_id = Column(Integer)
     query_context_json = Column(FlexibleJSON, nullable=False)
     llm_response = Column(String)
-    model_used = Column(String, nullable=False, default="claude-sonnet-4-6")
+    model_used = Column(String, nullable=False, default="claude-sonnet-4-5")
     tokens_used = Column(Integer)
     latency_ms = Column(Integer)
     is_cached = Column(Boolean, nullable=False, default=False)

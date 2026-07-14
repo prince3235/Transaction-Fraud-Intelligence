@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.markdown('<hr style="border-color:var(--border);">', unsafe_allow_html=True)
 
-DB_PATH = get_db_path()
+DB_PATH = get_db_path(PROJECT_ROOT)
 df = load_logs_df(DB_PATH, limit=2000)
 
 if df.empty:

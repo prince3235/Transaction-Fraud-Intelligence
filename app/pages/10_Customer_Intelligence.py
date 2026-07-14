@@ -143,14 +143,17 @@ st.markdown('<div class="section-label">Recent Activity for this Customer</div>'
 
 import sqlite3
 con = sqlite3.connect(DB_PATH, check_same_thread=False)
+# Use parameterized query — never f-string interpolate user input into SQL.
 df = pd.read_sql_query(
-    f"""
+    """
     SELECT id, created_at, ml_risk_level, final_risk_level, final_risk_score, status 
     FROM prediction_logs 
-    WHERE transaction_json LIKE '%"{customer_id}"%'
+    WHERE transaction_json LIKE ?
     ORDER BY created_at DESC 
     LIMIT 20
-    """, con
+    """,
+    con,
+    params=(f'%"{customer_id}"%',),
 )
 con.close()
 

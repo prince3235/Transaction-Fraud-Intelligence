@@ -1,3 +1,37 @@
+"""
+Premium Streamlit design system.
+
+Exports:
+- inject_premium_design(): injects the global CSS theme.
+- section_header(title, subtitle=None): renders a styled page header.
+- render_detail_card(label, value, hint=None): renders a small stat/detail card.
+"""
+import streamlit as st
+
+
+def section_header(title: str, subtitle: str = None) -> None:
+    """Render a styled page header (use at the top of each page)."""
+    sub_html = f'<div class="page-subtitle">{subtitle}</div>' if subtitle else ""
+    st.markdown(f"""
+    <div style="padding:1rem 0 1.5rem">
+      <div class="page-title">{title}</div>
+      {sub_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_detail_card(label: str, value, hint: str = None) -> None:
+    """Render a small inline stat card (label/value/hint)."""
+    hint_html = f'<div style="font-size:11px;color:#8899AA;margin-top:4px;">{hint}</div>' if hint else ""
+    st.markdown(f"""
+    <div style="background:rgba(0,0,0,0.2);padding:15px;border-radius:8px;border:1px solid rgba(148,163,184,0.1);">
+        <div style="font-size:11px;color:#8899AA;text-transform:uppercase;letter-spacing:0.05em;">{label}</div>
+        <div style="font-size:20px;font-weight:800;color:#E8F0FF;margin-top:4px;">{value}</div>
+        {hint_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def inject_premium_design():
     import streamlit as st
 

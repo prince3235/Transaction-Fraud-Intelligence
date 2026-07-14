@@ -1,5 +1,7 @@
 import streamlit as st
 import sys
+import html as html_lib
+import json
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -175,14 +177,17 @@ with c2:
         
         with t1:
             for note in case.get("notes", []):
+                note_author = html_lib.escape(str(note.get('author', '')), quote=True)
+                note_ts = html_lib.escape(str(note.get('timestamp', ''))[:16].replace('T', ' '), quote=True)
+                note_content = html_lib.escape(str(note.get('content', '')), quote=True)
                 st.markdown(f"""
                 <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(148,163,184,0.05);
                             border-radius:8px;padding:15px;margin-bottom:10px;">
                     <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px;">
-                        <span style="font-weight:700;color:#00B4FF;">@{note['author']}</span>
-                        <span style="color:#8899AA;">{note['timestamp'][:16].replace('T', ' ')}</span>
+                        <span style="font-weight:700;color:#00B4FF;">@{note_author}</span>
+                        <span style="color:#8899AA;">{note_ts}</span>
                     </div>
-                    <div style="font-size:13px;color:#E8F0FF;">{note['content']}</div>
+                    <div style="font-size:13px;color:#E8F0FF;">{note_content}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -198,13 +203,17 @@ with c2:
         with t2:
             timeline_html = "<div style='margin-left:20px;border-left:2px solid #00B4FF;padding-left:20px;'>"
             for event in reversed(case.get("timeline", [])):
+                ev_ts = html_lib.escape(str(event.get('timestamp', ''))[:16].replace('T', ' '), quote=True)
+                ev_actor = html_lib.escape(str(event.get('actor', '')), quote=True)
+                ev_action = html_lib.escape(str(event.get('action', '')), quote=True)
+                ev_note = html_lib.escape(str(event.get('note', '') or ''), quote=True)
                 timeline_html += f"""
                 <div style="position:relative;margin-bottom:20px;">
                     <div style="position:absolute;left:-26px;top:0;width:10px;height:10px;
                                 border-radius:50%;background:#00B4FF;"></div>
-                    <div style="font-size:12px;color:#8899AA;">{event['timestamp'][:16].replace('T', ' ')} • <b>@{event['actor']}</b></div>
-                    <div style="font-size:14px;font-weight:700;color:#E8F0FF;margin:4px 0;">{event['action']}</div>
-                    <div style="font-size:13px;color:#BAC4D0;">{event.get('note', '')}</div>
+                    <div style="font-size:12px;color:#8899AA;">{ev_ts} • <b>@{ev_actor}</b></div>
+                    <div style="font-size:14px;font-weight:700;color:#E8F0FF;margin:4px 0;">{ev_action}</div>
+                    <div style="font-size:13px;color:#BAC4D0;">{ev_note}</div>
                 </div>
                 """
             timeline_html += "</div>"

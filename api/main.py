@@ -1,13 +1,16 @@
 from datetime import timedelta
 import random
 import logging
+import os
 from typing import Optional
 
 from pathlib import Path
 from datetime import datetime, timezone
 
 import joblib
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 import sqlite3
@@ -19,8 +22,91 @@ from src.features import build_features, align_to_model_columns, load_json
 from src.risk_scoring import score_probability, apply_policy_overrides
 from src.alerts import create_alert, should_alert
 from src.storage import get_db_path, init_db, log_prediction, fetch_recent_logs
+from src.auth import authenticate, has_permission
+from src.rules_engine import evaluate_rules
+
+# Default Anthropic model — env-overridable. claude-sonnet-4-6 is NOT a real
+# model ID; we use the env var or fall back to a valid public ID.
+ANTHROPIC_MODEL_NAME = os.environ.get(
+    "ANTHROPIC_MODEL", "claude-sonnet-4-5"
+)
 
 app = FastAPI(title="Transaction Fraud Intelligence API", version="1.1.0")
+
+# ── CORS middleware ─────────────────────────────────────────────────────────
+# Allow the configured frontend origins (comma-separated in CORS_ORIGINS).
+# Default permits localhost Streamlit + Next.js dev servers.
+_DEFAULT_ORIGINS = (
+    "http://localhost:8501,http://127.0.0.1:8501,"
+    "http://localhost:3000,http://127.0.0.1:3000"
+)
+_allowed_origins = [
+    o.strip() for o in os.environ.get("CORS_ORIGINS", _DEFAULT_ORIGINS).split(",") if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Auth (Bearer token → user dict) ─────────────────────────────────────────
+_security = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
+) -> dict:
+    """
+    Resolve the bearer token to a user dict.
+
+    The token is interpreted as a session token issued by `/auth/login`.
+    In this simplified implementation we accept the API_AUTH_TOKEN env var
+    (constant-time compared) and return the admin user. Real deployments should
+    swap this for a session-token table lookup (see src/auth.generate_session_token).
+    """
+    # Public endpoints bypass this via `dependencies=[]`; protected ones require it.
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = credentials.credentials
+
+    # If a static admin API token is configured, accept it (constant-time).
+    api_token = os.environ.get("API_AUTH_TOKEN", "")
+    if api_token:
+        import hmac
+        if hmac.compare_digest(token, api_token):
+            return {"id": 0, "username": "api-client", "role": "Admin"}
+
+    # Otherwise treat token as username:password (demo convenience, never for prod)
+    # — this lets the Streamlit UI log in with the demo credentials.
+    if ":" in token:
+        username, password = token.split(":", 1)
+        user = authenticate(DB_PATH, username, password)
+        if user:
+            return user
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def require_permission(permission: str):
+    """FastAPI dependency factory that enforces a specific RBAC permission."""
+    def _checker(user: dict = Depends(get_current_user)) -> dict:
+        if not has_permission(user.get("role", ""), permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role `{user.get('role')}` lacks permission `{permission}`",
+            )
+        return user
+    return _checker
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
@@ -60,7 +146,7 @@ def score_tx(tx_dict: dict):
     ml_prob = float(model.predict_proba(X)[:, 1][0])
     base_risk = score_probability(ml_prob)
 
-    # Policy override
+    # Policy override (static heuristics)
     features_dict = X.iloc[0].to_dict()
     policy_out = apply_policy_overrides(base_risk, features_dict)
 
@@ -68,6 +154,39 @@ def score_tx(tx_dict: dict):
         final_risk, policy_reasons = policy_out
     else:
         final_risk, policy_reasons = policy_out, []
+
+    # ── Rules engine (DB-driven, dynamic) ──────────────────────────────────
+    # Evaluate active business rules against the engineered features and merge
+    # any matches into the policy_reasons + bump risk level if the rule says so.
+    rule_hits = []
+    try:
+        rule_final_level, triggered_rules = evaluate_rules(
+            DB_PATH, features_dict, current_risk_level=final_risk.risk_level
+        )
+        for hit in triggered_rules:
+            rule_hits.append({
+                "name": hit.get("name"),
+                "condition": hit.get("condition_json"),
+                "action": hit.get("action"),
+                "risk_level_bump": hit.get("risk_level_bump"),
+                "reason": f"Rule matched: {hit.get('name')} -> {hit.get('action')} to {hit.get('risk_level_bump')}",
+            })
+            policy_reasons.append(f"Rule matched: {hit.get('name')}")
+
+        # If rules engine escalated the level beyond what policy overides set,
+        # bump the final_risk to match (only escalates, never de-escalates).
+        if rule_final_level and rule_final_level != final_risk.risk_level:
+            from src.risk_scoring import LEVEL_MIN_SCORE, LEVEL_ORDER, RiskResult, recommended_action
+            if LEVEL_ORDER.get(rule_final_level, 0) > LEVEL_ORDER.get(final_risk.risk_level, 0):
+                new_score = max(final_risk.risk_score, LEVEL_MIN_SCORE[rule_final_level])
+                final_risk = RiskResult(
+                    probability=final_risk.probability,
+                    risk_score=new_score,
+                    risk_level=rule_final_level,
+                    recommended_action=recommended_action(rule_final_level),
+                )
+    except Exception as exc:
+        logger.warning("Rules engine evaluation failed (non-fatal): %s", exc)
 
     # Alert (MEDIUM+)
     alert = None
@@ -85,13 +204,13 @@ def score_tx(tx_dict: dict):
     # for debugging
     suspicious_signal_count = int(features_dict.get("suspicious_signal_count", 0))
 
-    return X, ml_prob, base_risk, final_risk, policy_reasons, alert, suspicious_signal_count
+    return X, ml_prob, base_risk, final_risk, policy_reasons, alert, suspicious_signal_count, rule_hits
 
 
 @app.post("/predict")
-def predict(tx: TransactionIn):
+def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
     tx_dict = tx.model_dump()
-    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc = score_tx(tx_dict)
+    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = score_tx(tx_dict)
 
     created_at = datetime.now(timezone.utc).isoformat()
 
@@ -120,14 +239,15 @@ def predict(tx: TransactionIn):
         "recommended_action": final_risk.recommended_action,
         "policy_override_applied": (final_risk.risk_level != base_risk.risk_level),
         "policy_reasons": policy_reasons,
+        "rule_hits": rule_hits,
         "alert": alert,
     }
 
 
 @app.post("/debug/predict")
-def debug_predict(tx: TransactionIn):
+def debug_predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
     tx_dict = tx.model_dump()
-    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc = score_tx(tx_dict)
+    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = score_tx(tx_dict)
 
     # Only show selected important engineered features (not full row)
     cols_to_show = [
@@ -166,12 +286,12 @@ def debug_predict(tx: TransactionIn):
 
 
 @app.get("/logs/recent")
-def recent_logs(limit: int = 50):
+def recent_logs(limit: int = 50, user: dict = Depends(get_current_user)):
     return {"limit": limit, "items": fetch_recent_logs(DB_PATH, limit=limit)}
 
 
 @app.post("/admin/seed-logs")
-def seed_logs(count: int = 1000):
+def seed_logs(count: int = 1000, user: dict = Depends(require_permission("manage_users"))):
     import pandas as pd
     import json
     import sqlite3
@@ -250,9 +370,9 @@ class ActionIn(BaseModel):
     status: str
 
 @app.post("/logs/{log_id}/action")
-def log_action(log_id: int, action: ActionIn):
+def log_action(log_id: int, action: ActionIn, user: dict = Depends(require_permission("manage_cases"))):
     if action.status not in ("APPROVED", "BLOCKED"):
-        return {"error": "Invalid status"}
+        raise HTTPException(status_code=422, detail="Invalid status — must be APPROVED or BLOCKED")
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     cur = con.cursor()
     cur.execute("UPDATE prediction_logs SET status = ? WHERE id = ?", (action.status, int(log_id)))
@@ -263,7 +383,7 @@ def log_action(log_id: int, action: ActionIn):
 # ========== ADMIN & MONITORING ENDPOINTS ==========
 
 @app.get("/stats")
-def get_stats():
+def get_stats(user: dict = Depends(get_current_user)):
     """Get system-level statistics for monitoring"""
     import sqlite3
     import pandas as pd
@@ -296,7 +416,7 @@ def get_stats():
 
 
 @app.get("/logs/{log_id}/explain")
-def explain_log(log_id: int):
+def explain_log(log_id: int, user: dict = Depends(get_current_user)):
     """Get detailed explanation for a specific log entry"""
     import sqlite3
     import json
@@ -347,7 +467,7 @@ class CopilotRequest(BaseModel):
 
 
 @app.post("/copilot/explain")
-def copilot_explain(req: CopilotRequest):
+def copilot_explain(req: CopilotRequest, user: dict = Depends(get_current_user)):
     """
     Generate a natural-language explanation for a flagged transaction.
 
@@ -383,7 +503,7 @@ def copilot_explain(req: CopilotRequest):
             "is_cached": result.get("is_cached", False),
             "latency_ms": result.get("latency_ms", 0),
             "error": result.get("error"),
-            "model": "claude-sonnet-4-6",
+            "model": ANTHROPIC_MODEL_NAME,
         }
 
     except Exception as exc:
@@ -401,7 +521,7 @@ def copilot_explain(req: CopilotRequest):
 
 
 @app.get("/copilot/logs")
-def get_copilot_logs(limit: int = 50):
+def get_copilot_logs(limit: int = 50, user: dict = Depends(require_permission("view_audit"))):
     """Fetch recent copilot query audit logs (admin/compliance use)."""
     try:
         con = sqlite3.connect(DB_PATH, check_same_thread=False)

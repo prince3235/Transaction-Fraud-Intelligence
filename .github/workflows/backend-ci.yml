@@ -25,14 +25,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Scan for eval/exec in Python codebase
+      - name: Scan for builtin eval()/exec() in Python codebase
         run: |
-          echo "Scanning for eval() and exec() usage in src/ and api/ directories..."
-          if grep -rnE "\b(eval|exec)\s*\(" src/ api/; then
-            echo "ERROR: eval() or exec() found! Remote Code Execution vulnerability detected."
+          echo "Scanning for builtin eval() and exec() usage in src/ and api/..."
+          # Match only calls to builtin eval/exec, not method calls like
+          # `evaluator.eval(...)` or `obj.exec(...)`. We require the keyword to be
+          # at the start of a line (after optional whitespace) or preceded by a
+          # non-word character that is NOT a dot — so `evaluator.eval(` won't match
+          # but a bare `eval(` or `foo = eval(` will.
+          if grep -rnE '(^|[^.a-zA-Z_])\b(eval|exec)\s*\(' src/ api/; then
+            echo "ERROR: builtin eval() or exec() found! Remote Code Execution vulnerability."
             exit 1
           fi
-          echo "No eval() or exec() usage detected. Security scan passed."
+          echo "No builtin eval()/exec() usage detected. Security scan passed."
 
   pytest:
     runs-on: ubuntu-latest
