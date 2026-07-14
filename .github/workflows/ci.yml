@@ -7,9 +7,47 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test:
+  security-scan:
     runs-on: ubuntu-latest
-    
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan for eval/exec in Python codebase
+        run: |
+          echo "Scanning for eval() and exec() usage in src/ and api/ directories..."
+          if grep -rnE "\b(eval|exec)\s*\(" src/ api/; then
+            echo "ERROR: eval() or exec() found! Remote Code Execution vulnerability detected."
+            exit 1
+          fi
+          echo "No eval() or exec() usage detected. Security scan passed."
+          
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          
+      - name: Install Bandit
+        run: pip install bandit
+        
+      - name: Run Bandit
+        run: bandit -r src/ api/ -ll -ii || echo "Bandit found potential issues but continuing..."
+
+  backend-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: test_fraud_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v4
     
@@ -25,11 +63,29 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-cov
         
-    - name: Run tests with pytest
+    - name: Run Pytest
       env:
-        # testcontainers uses Docker, which is pre-installed on GitHub Actions ubuntu-latest runners
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/test_fraud_db
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || 'dummy_key_for_tests' }}
       run: |
-        # Set a dummy key if none exists so tests don't fail immediately on import
-        export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy_key_for_tests}"
         pytest -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+        cache: "npm"
+        cache-dependency-path: frontend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+        
+    - name: Run Next.js build
+      working-directory: ./frontend
+      run: npm run build
