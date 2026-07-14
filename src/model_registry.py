@@ -94,12 +94,26 @@ def register_model(
     feature_count: int,
     notes: str = "",
 ) -> Dict[str, Any]:
-    """Register a newly trained model version."""
+    """Register a newly trained model version.
+
+    Version is computed as max(existing version ints) + 1 — NOT count + 1.
+    The old count-based approach collided if any rows were ever deleted
+    (e.g., by archiving + cleanup), violating the UNIQUE(version) constraint.
+    """
     db = SessionLocal()
     try:
-        count = db.query(ModelRegistry).count()
-        version = f"v{count + 1}"
-        
+        # Find the max existing version integer to avoid collision on deletion
+        all_versions = db.query(ModelRegistry.version).all()
+        max_v = 0
+        for (v,) in all_versions:
+            try:
+                v_int = int(v.lstrip("vV"))
+                if v_int > max_v:
+                    max_v = v_int
+            except (ValueError, AttributeError):
+                continue
+        version = f"v{max_v + 1}"
+
         now = _now()
         model = ModelRegistry(
             version=version,
@@ -121,7 +135,7 @@ def register_model(
         db.add(model)
         db.commit()
         db.refresh(model)
-        
+
         return {
             "id": model.id,
             "version": model.version,
@@ -164,9 +178,61 @@ def archive_model(db_path: Path, version: str) -> None:
         model = db.query(ModelRegistry).filter(ModelRegistry.version == version).first()
         if model and model.is_production:
             raise ValueError("Cannot archive the active production model.")
-            
+
         if model:
             model.is_archived = True
             db.commit()
+    finally:
+        db.close()
+
+
+def rollback_model(db_path: Path) -> Dict[str, Any]:
+    """
+    Rollback production to the most recent non-archived, non-production model.
+
+    Useful when a freshly-promoted model is misbehaving and you need to revert
+    quickly. Returns the newly-promoted model dict, or raises ValueError if
+    there's no previous version to roll back to.
+    """
+    db = SessionLocal()
+    try:
+        # Find the current production model
+        current = db.query(ModelRegistry).filter(ModelRegistry.is_production == True).first()
+        if not current:
+            raise ValueError("No production model set — nothing to roll back from.")
+
+        # Find the most recent non-archived, non-production version
+        # (created BEFORE the current production model)
+        previous = (
+            db.query(ModelRegistry)
+            .filter(
+                ModelRegistry.is_archived == False,
+                ModelRegistry.is_production == False,
+                ModelRegistry.id < current.id,
+            )
+            .order_by(ModelRegistry.id.desc())
+            .first()
+        )
+        if not previous:
+            raise ValueError(
+                f"No previous non-archived model to roll back to "
+                f"(current prod is {current.version})."
+            )
+
+        # Demote current, promote previous
+        current.is_production = False
+        previous.is_production = True
+        db.commit()
+        db.refresh(previous)
+
+        return {
+            "id": previous.id,
+            "version": previous.version,
+            "pkl_path": previous.pkl_path,
+            "roc_auc": previous.roc_auc,
+            "pr_auc": previous.pr_auc,
+            "rolled_back_from": current.version,
+            "is_production": True,
+        }
     finally:
         db.close()

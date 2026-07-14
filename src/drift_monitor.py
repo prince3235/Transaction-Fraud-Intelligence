@@ -4,7 +4,7 @@ Enterprise Data Drift Monitor.
 Provides:
 - Population Stability Index (PSI) calculation for numerical features
 - Drift snapshot logging to database
-- Threshold alerting
+- Threshold alerting (unified threshold from src.constants)
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from src.constants import ALERT_THRESHOLD
 from src.db import SessionLocal
 from src.models import DriftSnapshot
 
@@ -52,10 +53,12 @@ def record_drift_snapshot(
     feature_name: str,
     baseline_data: np.ndarray,
     current_data: np.ndarray,
-    alert_threshold: float = 0.2,
+    alert_threshold: float = ALERT_THRESHOLD,
 ) -> Dict[str, Any]:
     """
     Calculate PSI for a feature and save the snapshot to the database.
+    Default threshold comes from src.constants.ALERT_THRESHOLD (was 0.2, now
+    unified with retrain_trigger's 0.25 — both import from the same source).
     """
     psi_score = calculate_psi(baseline_data, current_data)
     alert = 1 if psi_score >= alert_threshold else 0

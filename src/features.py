@@ -62,10 +62,28 @@ def build_features(tx: Dict[str, Any], config: Dict[str, Any]) -> pd.DataFrame:
     is_large_transaction = int(amount > large_threshold)
 
     step_bins = config["step_bins"]
-    step_bucket = int(pd.cut([step], bins=step_bins, labels=False, include_lowest=True)[0])
+    # pd.cut returns NaN for out-of-range steps (step > max training step).
+    # Previously int(NaN) crashed with ValueError. Now we fall back to the
+    # last (highest) bucket so production traffic with future steps still scores.
+    try:
+        bucket_val = pd.cut([step], bins=step_bins, labels=False, include_lowest=True)[0]
+        if pd.isna(bucket_val):
+            # Step is above the max training step — use the last bucket
+            step_bucket = len(step_bins) - 2
+        else:
+            step_bucket = int(bucket_val)
+    except (ValueError, TypeError, IndexError):
+        step_bucket = 0
 
     step_counts = config["step_counts"]
-    transactions_in_step = int(step_counts.get(str(step), 0))
+    # transactions_in_step is a static lookup from training data. For production
+    # real-time velocity, callers can override this by passing a tx dict with
+    # an "_runtime_transactions_in_step" key (used by the stream simulator).
+    runtime_count = tx.get("_runtime_transactions_in_step")
+    if runtime_count is not None:
+        transactions_in_step = int(runtime_count)
+    else:
+        transactions_in_step = int(step_counts.get(str(step), 0))
     median_tx_in_step = float(config["median_transactions_in_step"])
     is_high_velocity_step = int(transactions_in_step > median_tx_in_step)
 

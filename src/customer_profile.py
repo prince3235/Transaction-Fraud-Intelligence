@@ -4,10 +4,11 @@ Enterprise Customer Risk Profile Module.
 Provides:
 - Aggregation of transaction history per customer (sender account)
 - Risk profiling (average risk score, fraud count)
-- Device and Location count approximations
+- Device and Location count approximations (deterministic hash, NOT Python hash)
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -104,9 +105,14 @@ def get_or_create_customer_profile(db_path: Path, customer_id: str) -> Dict[str,
                 
         # Insert new profile
         now = _now()
-        # Device and country counts are mocked for demo based on hash of customer ID
-        device_cnt = 1 + (hash(customer_id) % 3)
-        country_cnt = 1 + (hash(customer_id) % 2)
+        # Device and country counts are mocked for demo, but we use a
+        # DETERMINISTIC hash (sha256) instead of Python's builtin hash().
+        # Python's hash() is salted per-process (PYTHONHASHSEED), so the same
+        # customer got different counts on each restart — corrupting persisted
+        # profiles. sha256 is deterministic across processes and machines.
+        cust_hash = int(hashlib.sha256(customer_id.encode("utf-8")).hexdigest(), 16)
+        device_cnt = 1 + (cust_hash % 3)
+        country_cnt = 1 + (cust_hash % 2)
         
         new_profile = CustomerProfile(
             customer_id=customer_id,

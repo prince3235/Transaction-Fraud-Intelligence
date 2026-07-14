@@ -114,12 +114,58 @@ MODEL_PATH = BASE_DIR / "models" / "best_fraud_model.pkl"
 CONFIG_PATH = BASE_DIR / "models" / "feature_config.json"
 COLS_PATH = BASE_DIR / "models" / "feature_columns.json"
 
-model = joblib.load(MODEL_PATH)
+
+def _load_model_from_registry():
+    """
+    Load the model pkl, consulting the model registry for the active version's
+    pkl_path. Falls back to the default MODEL_PATH if the registry is empty
+    or the registered path doesn't exist on disk.
+    """
+    try:
+        from src.model_registry import get_active_model
+        active = get_active_model(BASE_DIR)
+        if active and active.get("pkl_path"):
+            registered_path = Path(active["pkl_path"])
+            if not registered_path.is_absolute():
+                registered_path = BASE_DIR / registered_path
+            if registered_path.exists():
+                logger.info("Loading model %s from registry path: %s",
+                            active.get("version"), registered_path)
+                return joblib.load(registered_path), active
+    except Exception as exc:
+        logger.warning("Model registry lookup failed, falling back to default path: %s", exc)
+
+    logger.info("Loading model from default path: %s", MODEL_PATH)
+    return joblib.load(MODEL_PATH), None
+
+
+model, active_model_info = _load_model_from_registry()
 config = load_json(CONFIG_PATH)
 model_columns = load_json(COLS_PATH)
 
 DB_PATH = get_db_path(BASE_DIR)
 init_db(DB_PATH)
+
+
+# ── Startup: start drift scheduler ───────────────────────────────────────────
+@app.on_event("startup")
+def _start_background_jobs():
+    """Start the drift-monitor scheduler on app startup (was previously dead code)."""
+    try:
+        from src.retrain_trigger import start_scheduler
+        start_scheduler()
+    except Exception as exc:
+        logger.warning("Failed to start drift scheduler (non-fatal): %s", exc)
+
+
+@app.on_event("shutdown")
+def _stop_background_jobs():
+    """Gracefully stop the scheduler on app shutdown."""
+    try:
+        from src.retrain_trigger import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
 
 
 class TransactionIn(BaseModel):
@@ -134,7 +180,33 @@ class TransactionIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "db_path": str(DB_PATH)}
+    return {
+        "status": "ok",
+        "db_path": str(DB_PATH),
+        "model_version": (active_model_info or {}).get("version", "unknown"),
+    }
+
+
+@app.post("/admin/reload-model")
+def reload_model(user: dict = Depends(require_permission("retrain_model"))):
+    """
+    Reload the model from disk + registry. Call this after promoting a new
+    model version in the registry so the running API process picks it up
+    without needing a full restart.
+    """
+    global model, active_model_info
+    try:
+        model, active_model_info = _load_model_from_registry()
+        return {
+            "status": "ok",
+            "model_version": (active_model_info or {}).get("version", "unknown"),
+            "pkl_path": (active_model_info or {}).get("pkl_path", str(MODEL_PATH)),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reload model: {exc}",
+        )
 
 
 def score_tx(tx_dict: dict):
