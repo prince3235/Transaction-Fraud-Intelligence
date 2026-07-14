@@ -169,6 +169,49 @@ def explain_prediction(
     }
 
 
+def get_global_feature_importance(base_dir: Path) -> Dict[str, Any]:
+    """
+    Return global feature importance from the cached permutation importance
+    report (if available), falling back to model.feature_importances_.
+
+    Used by the LLM Copilot to provide context like "the top 3 features driving
+    fraud predictions globally are X, Y, Z".
+    """
+    # Try permutation importance report first (more reliable than tree importances)
+    perm_path = base_dir / "reports" / "permutation_importance.json"
+    if perm_path.exists():
+        try:
+            import json
+            with perm_path.open("r") as f:
+                perm_data = json.load(f)
+            if perm_data:
+                return {
+                    "method": "permutation",
+                    "top_features": [
+                        {"feature": r["feature"], "importance": r["importance"]}
+                        for r in perm_data[:10]
+                    ],
+                }
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Fallback to model.feature_importances_ (Gini importance — biased toward
+    # high-cardinality features, but always available)
+    model, _, feature_cols = _load_model_and_explainer(base_dir)
+    if model is not None and hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_
+        cols = feature_cols or [f"f{i}" for i in range(len(importances))]
+        pairs = sorted(zip(cols, importances), key=lambda x: x[1], reverse=True)
+        return {
+            "method": "gini",
+            "top_features": [
+                {"feature": f, "importance": float(i)} for f, i in pairs[:10]
+            ],
+        }
+
+    return {"method": "none", "top_features": []}
+
+
 def _global_importance_fallback(
     model, X: pd.DataFrame, prob: float, feature_cols: List[str]
 ) -> Tuple[np.ndarray, float, str]:

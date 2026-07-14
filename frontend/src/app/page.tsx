@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LoginPage } from "@/components/fraud/pages/login";
+import { useAuth } from "@/lib/auth-context";
 import { Sidebar, type PageKey } from "@/components/fraud/sidebar";
 import { Topbar } from "@/components/fraud/topbar";
 import { CommandCenterPage } from "@/components/fraud/pages/command-center";
@@ -11,18 +11,28 @@ import { SimulationPage } from "@/components/fraud/pages/simulation";
 import { RulesPage } from "@/components/fraud/pages/rules";
 import { ModelRegistryPage } from "@/components/fraud/pages/model-registry";
 import { AuditPage } from "@/components/fraud/pages/audit";
-
-interface User {
-  name: string;
-  role: string;
-}
+import { LoginPage } from "@/components/fraud/pages/login";
 
 export default function Home() {
-  const [user, setUser] = useState<User | null>(null);
+  const { user, loading, login, logout } = useAuth();
   const [page, setPage] = useState<PageKey>("command-center");
 
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
   if (!user) {
-    return <LoginPage onLogin={setUser} />;
+    return (
+      <LoginPage
+        onLogin={async (u) => {
+          await login(u.name, "demo-password", u.role);
+        }}
+      />
+    );
   }
 
   const roleLabel =
@@ -37,7 +47,7 @@ export default function Home() {
       <Sidebar
         active={page}
         onNavigate={setPage}
-        user={{ name: user.name, role: roleLabel }}
+        user={{ name: user.username, role: roleLabel }}
       />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar page={page} />

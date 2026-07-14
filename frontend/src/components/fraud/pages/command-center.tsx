@@ -4,7 +4,8 @@ import { MetricCard } from "@/components/fraud/metric-card";
 import { RiskBadge } from "@/components/fraud/risk-badge";
 import { Card } from "@/components/ui/card";
 import { Activity, ShieldX, ShieldCheck, Gauge, TrendingUp, AlertTriangle, DollarSign, FolderKanban } from "lucide-react";
-import { ALERTS, CASES, getStats, getAlertTrend } from "@/lib/fraud-data";
+import { getStats, getAlertTrend, ALERTS, CASES } from "@/lib/fraud-data";
+import { useStats, useAlertTrend, useAlerts } from "@/lib/api-hooks";
 import {
   formatCompactCurrency,
   formatNumber,
@@ -14,20 +15,31 @@ import {
 } from "@/lib/fraud-utils";
 import { cn } from "@/lib/utils";
 
-const stats = getStats();
-const trend = getAlertTrend();
-const maxTrend = Math.max(...trend.map((t) => t.alerts));
-
-const RISK_DIST = [
-  { level: "CRITICAL" as const, count: stats.critical, color: "var(--risk-critical)" },
-  { level: "HIGH" as const, count: stats.high, color: "var(--risk-high)" },
-  { level: "MEDIUM" as const, count: stats.medium, color: "var(--risk-medium)" },
-  { level: "LOW" as const, count: stats.low, color: "var(--risk-low)" },
-];
-const totalRisk = RISK_DIST.reduce((s, r) => s + r.count, 0);
+// Fallback data (used when backend is unreachable)
+const fallbackStats = getStats();
+const fallbackTrend = getAlertTrend();
 
 export function CommandCenterPage() {
-  const recentAlerts = ALERTS.slice()
+  // Real API hooks with fallback to mock data
+  const { data: apiStats } = useStats();
+  const { data: trend = fallbackTrend } = useAlertTrend();
+  const { data: alerts = [] } = useAlerts(50);
+
+  // Use API stats if available, otherwise fallback
+  const stats = apiStats || fallbackStats;
+  const maxTrend = Math.max(...trend.map((t) => t.alerts));
+
+  const RISK_DIST = [
+    { level: "CRITICAL" as const, count: stats.critical, color: "var(--risk-critical)" },
+    { level: "HIGH" as const, count: stats.high, color: "var(--risk-high)" },
+    { level: "MEDIUM" as const, count: stats.medium, color: "var(--risk-medium)" },
+    { level: "LOW" as const, count: stats.low, color: "var(--risk-low)" },
+  ];
+  const totalRisk = RISK_DIST.reduce((s, r) => s + r.count, 0);
+
+  // Use real alerts if available, otherwise fallback to mock ALERTS
+  const recentAlerts = (alerts.length > 0 ? alerts : ALERTS)
+    .slice()
     .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
     .slice(0, 6);
 

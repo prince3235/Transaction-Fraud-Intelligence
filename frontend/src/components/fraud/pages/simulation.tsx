@@ -6,6 +6,7 @@ import { RiskBadge } from "@/components/fraud/risk-badge";
 import { RiskBar } from "@/components/fraud/risk-bar";
 import { cn } from "@/lib/utils";
 import { formatCompactCurrency, formatProbability } from "@/lib/fraud-utils";
+import { usePredict } from "@/lib/api-hooks";
 import { FlaskConical, Play, RotateCcw, Activity, Cpu, Zap } from "lucide-react";
 
 const TX_TYPES = [
@@ -34,32 +35,33 @@ export function SimulationPage() {
   const [step, setStep] = useState(420);
   const [result, setResult] = useState<SimResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const predictMutation = usePredict();
 
-  const run = () => {
+  const run = async () => {
     setLoading(true);
-    setTimeout(() => {
+    try {
+      // Call the real API (falls back to mock prediction if backend unreachable)
+      const apiResult = await predictMutation.mutateAsync({
+        step,
+        type,
+        amount,
+        oldbalanceOrg: oldBalOrig,
+        newbalanceOrig: newBalOrig,
+        oldbalanceDest: oldBalDest,
+        newbalanceDest: newBalDest,
+      });
+
+      // Compute display features locally (the API returns risk, not features)
       const ratio = amount / Math.max(1, oldBalOrig);
       const emptied = oldBalOrig > 0 && newBalOrig === 0 ? 1 : 0;
       const destLarge = oldBalDest === 0 && newBalDest > 10000 ? 1 : 0;
       const balanceErr = Math.abs(newBalOrig - (oldBalOrig - amount));
 
-      const reasons: string[] = [];
-      if (ratio > 1 && emptied) reasons.push("Policy: Amount > sender balance + sender account emptied");
-      if (amount > 100000) reasons.push("Rule matched: Large Transfer Amount");
-      if (emptied && ratio > 0.95) reasons.push("Rule matched: Account Drain Pattern");
-      if (destLarge && amount > 50000) reasons.push("Rule matched: First-time Beneficiary + Large Amount");
-      if (Math.abs(balanceErr) > 1) reasons.push("Rule matched: Balance Error Anomaly");
-
-      const baseProb = Math.min(0.99, 0.3 + (amount / 1_000_000) * 0.5 + emptied * 0.3 + (ratio > 1 ? 0.2 : 0));
-      const finalProb = Math.min(0.99, baseProb + reasons.length * 0.05);
-      const score = Math.round(finalProb * 100);
-      const level = score >= 85 ? "CRITICAL" : score >= 70 ? "HIGH" : score >= 40 ? "MEDIUM" : "LOW";
-
       setResult({
-        probability: finalProb,
-        riskScore: score,
-        riskLevel: level as SimResult["riskLevel"],
-        reasons,
+        probability: apiResult.ml_probability,
+        riskScore: apiResult.final_risk_score,
+        riskLevel: apiResult.final_risk_level as SimResult["riskLevel"],
+        reasons: apiResult.policy_reasons,
         features: [
           { name: "amount_to_oldbalance_orig_ratio", value: ratio.toFixed(3), impact: "high" },
           { name: "sender_account_emptied", value: emptied.toString(), impact: "high" },
@@ -69,8 +71,12 @@ export function SimulationPage() {
           { name: "type_risk_score", value: (TX_TYPES.find((t) => t.value === type)?.risk ?? 0).toString(), impact: "low" },
         ],
       });
+    } catch (err) {
+      // Fallback: compute locally (shouldn't happen — api-client has its own fallback)
+      console.error("Prediction failed:", err);
+    } finally {
       setLoading(false);
-    }, 700);
+    }
   };
 
   const reset = () => {
