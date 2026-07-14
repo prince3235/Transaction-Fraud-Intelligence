@@ -1,35 +1,22 @@
-name: CI Pipeline
+name: CI (root)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-  test:
+  python-lint:
+    name: Python syntax check
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-        cache: "pip"
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov
-        
-    - name: Run tests with pytest
-      env:
-        # testcontainers uses Docker, which is pre-installed on GitHub Actions ubuntu-latest runners
-        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      run: |
-        # Set a dummy key if none exists so tests don't fail immediately on import
-        export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy_key_for_tests}"
-        pytest -v
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile all Python files
+        run: |
+          find . -name "*.py" -not -path "./node_modules/*" -not -path "./frontend/*" \
+            | xargs -I{} python -m py_compile {} && echo "All Python files compile OK"

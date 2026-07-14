@@ -1,55 +1,101 @@
-name: Docker Build & Push
+name: Build & Push Docker Images
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 permissions:
-  packages: write
   contents: read
+  packages: write
 
 jobs:
-  build-push:
+  build-and-push:
+    name: Build ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - image: api
-            context: .
+          - service: api
             dockerfile: docker/Dockerfile.api
-          - image: streamlit
-            context: .
+            image_suffix: api
+          - service: streamlit
             dockerfile: docker/Dockerfile.streamlit
-          - image: frontend
-            context: frontend
+            image_suffix: frontend
+          - service: nextjs
             dockerfile: frontend/Dockerfile
-
+            image_suffix: nextjs
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Extract owner and repo in lowercase
-      run: |
-        echo "REPO_LOWER=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-        
-    - name: Build and push
-      uses: docker/build-push-action@v5
-      with:
-        context: ${{ matrix.context }}
-        file: ${{ matrix.dockerfile }}
-        push: true
-        tags: |
-          ghcr.io/${{ env.REPO_LOWER }}-${{ matrix.image }}:latest
-          ghcr.io/${{ env.REPO_LOWER }}-${{ matrix.image }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - uses: actions/checkout@v4
+
+      - name: Skip nextjs if Dockerfile missing
+        id: skip-check
+        run: |
+          if [ "${{ matrix.service }}" = "nextjs" ] && [ ! -f "frontend/Dockerfile" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Next.js Dockerfile not found — skipping."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.skip-check.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.skip-check.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.skip-check.outputs.skip != 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-${{ matrix.image_suffix }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - name: Build & push
+        if: steps.skip-check.outputs.skip != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  security-scan:
+    name: Security Scan (Trivy + pip-audit)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: pip-audit (Python dependency scan)
+        uses: astral-sh/pip-audit-action@v2
+        with:
+          inputs: requirements.txt
+          # Ignore local/dev-only deps without vuln DB coverage
+          ignore-vuln: ""
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: '0'  # advisory for now — flip to '1' to enforce
+          ignore-unfixed: true
