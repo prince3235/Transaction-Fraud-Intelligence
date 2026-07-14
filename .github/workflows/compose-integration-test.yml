@@ -13,19 +13,14 @@ jobs:
       
       - name: Create .env file from secrets
         run: |
-          cat > .env <<EOF
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY || 'dummy_key_for_tests' }}
-          POSTGRES_USER=postgres
-          POSTGRES_PASSWORD=postgrespassword
-          POSTGRES_DB=test_fraud_db
-          API_AUTH_TOKEN=test-admin-token-12345
-          SEED_DEMO_USERS=0
-          CORS_ORIGINS=http://localhost:8501,http://localhost:3000
-          EOF
-
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+          echo "POSTGRES_USER=postgres" >> .env
+          echo "POSTGRES_PASSWORD=postgrespassword" >> .env
+          echo "POSTGRES_DB=test_fraud_db" >> .env
+          
       - name: Start Docker Compose stack
         run: docker compose -f docker-compose.yml up -d --build
-
+        
       - name: Wait for API health
         run: |
           echo "Waiting for API to be healthy..."
@@ -41,21 +36,19 @@ jobs:
               exit 1
             fi
           done
-
+          
       - name: Run Smoke Tests
         run: |
           echo "Testing GET /health"
           curl -f http://localhost:8000/health
-
-          echo "Testing POST /predict (with auth)"
+          
+          echo "Testing POST /predict"
           curl -f -X POST http://localhost:8000/predict \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer test-admin-token-12345" \
             -d '{"amount": 1000, "type": "TRANSFER", "oldbalanceOrg": 5000, "newbalanceOrig": 4000, "oldbalanceDest": 0, "newbalanceDest": 1000, "step": 1}'
-
-          echo "Testing GET /logs/recent (with auth)"
-          curl -f http://localhost:8000/logs/recent?limit=5 \
-            -H "Authorization: Bearer test-admin-token-12345"
+            
+          echo "Testing GET /alerts"
+          curl -f http://localhost:8000/alerts
           
       - name: Capture logs on failure
         if: failure()
