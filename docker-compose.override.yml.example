@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  api:
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - .:/app
+      - db_data:/app/data
+      - model_data:/app/models
+
+  frontend:
+    command: ["streamlit", "run", "app/Home.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.runOnSave=true", "--server.maxUploadSize=10"]
+    volumes:
+      - .:/app
+
+  mlflow:
+    volumes:
+      - mlflow_data:/mlflow
