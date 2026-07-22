@@ -99,6 +99,9 @@ def build_features(tx: Dict[str, Any], config: Dict[str, Any]) -> pd.DataFrame:
         + int(amount_to_oldbalance_orig_ratio > 1)
     )
 
+    velocity_count_10m = float(tx.get("velocity_count_10m", 0.0))
+    velocity_sum_10m = float(tx.get("velocity_sum_10m", 0.0))
+
     row = {
         "step": step,
         "amount": amount,
@@ -129,6 +132,8 @@ def build_features(tx: Dict[str, Any], config: Dict[str, Any]) -> pd.DataFrame:
         "is_high_velocity_step": is_high_velocity_step,
         "is_dest_high_balance": is_dest_high_balance,
         "suspicious_signal_count": suspicious_signal_count,
+        "velocity_count_10m": velocity_count_10m,
+        "velocity_sum_10m": velocity_sum_10m,
     }
 
     return pd.DataFrame([row])
