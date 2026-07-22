@@ -192,3 +192,17 @@ def test_copilot_logs_requires_view_audit(client):
     """GET /copilot/logs without auth should 401/403."""
     resp = client.get("/copilot/logs")
     assert resp.status_code in (401, 403)
+
+
+# ── JWT Authentication Flow ───────────────────────────────────────────────────
+
+def test_jwt_auth_flow(client):
+    """Verify JWT access token creation, header authorization, and API access."""
+    from src.auth import create_access_token
+    token = create_access_token({"sub": "admin_test", "id": 1, "role": "Admin"})
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = client.get("/stats", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_scored" in data
+

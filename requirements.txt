@@ -38,6 +38,7 @@ openpyxl>=3.1.2,<4.0
 
 # ── Security ─────────────────────────────────────────────────────────────────
 bcrypt>=4.1.2,<5.0
+PyJWT>=2.8.0,<3.0
 
 # ── Dev / test (consider moving to requirements-dev.txt in future) ──────────
 pytest>=7.4.3,<9.0
