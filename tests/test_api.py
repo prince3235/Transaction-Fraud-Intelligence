@@ -37,9 +37,10 @@ def client():
     """FastAPI TestClient with mocked model (avoids loading the real pkl)."""
     # Mock joblib.load BEFORE importing api.main so model load doesn't fail
     with patch("joblib.load") as mock_load, \
-         patch("src.storage.init_db"), \
          patch("src.retrain_trigger.start_scheduler"), \
          patch("src.retrain_trigger.stop_scheduler"):
+        from src.storage import init_db
+        init_db()
         # Mock model returns a probability array
         mock_model = MagicMock()
         mock_model.predict_proba.return_value = [[0.1, 0.85]]  # 85% fraud

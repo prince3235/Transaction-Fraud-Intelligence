@@ -102,3 +102,12 @@ def test_copilot_explain_timeout(mock_add_xai, mock_get_client, mock_db):
     
     row = db_session.query(CopilotLog).order_by(CopilotLog.id.desc()).first()
     assert row.error == "TIMEOUT"
+
+
+def test_rag_retriever():
+    """Verify TF-IDF & cosine similarity RAG retrieval returns relevant docs."""
+    from src.llm_copilot import ComplianceKnowledgeRetriever
+    retriever = ComplianceKnowledgeRetriever()
+    results = retriever.retrieve("account balance reduced to zero transfer money laundering", top_k=2)
+    assert len(results) > 0
+    assert any("DOC-101" in d["id"] or "AML" in d["category"] for d in results)
