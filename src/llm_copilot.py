@@ -114,8 +114,118 @@ def _translate_feature(feature_name: str, value: float, contribution: float) -> 
     return f"{base} ({direction} risk)"
 
 
-def _build_prompt(context: Dict[str, Any]) -> str:
-    """Construct the structured user prompt from all available case context."""
+# ── RAG Compliance Knowledge Base & Vector Retriever ─────────────────────────
+
+DEFAULT_COMPLIANCE_DOCS = [
+    {
+        "id": "DOC-101",
+        "title": "AML Policy 102: Single-Transaction Account Draining",
+        "category": "Anti-Money Laundering",
+        "content": (
+            "When a sender's account balance is reduced to zero in a single transfer or cash-out transaction, "
+            "it represents a severe red flag for money laundering or account takeover. Investigators must verify "
+            "whether funds were moved to a newly created counterparty account and place a temporary hold on outward settlement."
+        )
+    },
+    {
+        "id": "DOC-204",
+        "title": "Compliance Guideline 204: High Velocity Burst Patterns",
+        "category": "Fraud Operations",
+        "content": (
+            "Multi-transaction bursts occurring within the same time step indicate automated botnet or script execution. "
+            "Transactions falling within high-velocity time steps must be subjected to step-level fraud aggregation analysis, "
+            "and device fingerprinting should be enforced."
+        )
+    },
+    {
+        "id": "DOC-305",
+        "title": "Fraud Prevention Manual Sec 4.1: Mule Destination Account Profiles",
+        "category": "Financial Crime",
+        "content": (
+            "Destination accounts starting with a zero opening balance that receive substantial incoming transfers are prime "
+            "candidates for money mule intermediary accounts. High-risk actions include immediately freezing the recipient account "
+            "and requesting re-KYC verification before allowing fund disbursement."
+        )
+    },
+    {
+        "id": "DOC-408",
+        "title": "Payment Regulation Standard 408: High-Risk Transaction Types",
+        "category": "Regulatory Policy",
+        "content": (
+            "TRANSFER and CASH_OUT transaction types exhibit significantly higher historical fraud loss rates compared to PAYMENT or DEBIT. "
+            "Any TRANSFER followed immediately by a CASH_OUT of identical magnitude constitutes a classic fraud loop requiring mandatory manual review."
+        )
+    },
+    {
+        "id": "DOC-512",
+        "title": "Data Integrity Policy 512: Balance Discrepancy & Ledger Error",
+        "category": "Audit & Compliance",
+        "content": (
+            "Post-transaction balance discrepancies (where calculated new balance differs from ledger recorded new balance) signal "
+            "either database tampering, race condition exploitation, or payload manipulation. Transactions exhibiting non-zero balance error "
+            "must be escalated to senior compliance auditors immediately."
+        )
+    },
+    {
+        "id": "DOC-601",
+        "title": "FinCEN & FATF SAR Filing Guidelines (Thresholds & Signal Accumulation)",
+        "category": "Regulatory Reporting",
+        "content": (
+            "Accumulation of 3 or more concurrent suspicious risk signals (e.g. large amount, zero balance destination, high velocity) "
+            "triggers mandatory regulatory reporting evaluation. If total flagged transaction value exceeds $10,000, compliance officers "
+            "must draft a Suspicious Activity Report (SAR) within 30 days."
+        )
+    }
+]
+
+
+class ComplianceKnowledgeRetriever:
+    """
+    RAG Vector Retriever for Fraud Compliance & Regulatory Guidelines.
+    Uses TF-IDF vector embeddings & Cosine Similarity for fast, dependency-free semantic retrieval.
+    """
+
+    def __init__(self, docs: Optional[List[Dict[str, str]]] = None):
+        self.docs = docs or DEFAULT_COMPLIANCE_DOCS
+        self.vectorizer = None
+        self.doc_matrix = None
+        self._build_index()
+
+    def _build_index(self):
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            corpus = [f"{d['title']} {d['category']} {d['content']}" for d in self.docs]
+            self.vectorizer = TfidfVectorizer(stop_words="english")
+            self.doc_matrix = self.vectorizer.fit_transform(corpus)
+        except Exception as exc:
+            logger.warning("Failed to build RAG vector index: %s", exc)
+
+    def retrieve(self, query: str, top_k: int = 2) -> List[Dict[str, str]]:
+        """Retrieve top_k most relevant compliance policy chunks for a query string."""
+        if not self.vectorizer or self.doc_matrix is None or not query.strip():
+            return self.docs[:top_k]
+
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+            query_vec = self.vectorizer.transform([query])
+            sims = cosine_similarity(query_vec, self.doc_matrix).flatten()
+            top_indices = sims.argsort()[::-1][:top_k]
+            
+            results = []
+            for idx in top_indices:
+                if sims[idx] > 0.05:
+                    results.append(self.docs[idx])
+            return results if results else self.docs[:top_k]
+        except Exception as exc:
+            logger.warning("Error during RAG retrieval: %s", exc)
+            return self.docs[:top_k]
+
+
+_rag_retriever = ComplianceKnowledgeRetriever()
+
+
+def _build_prompt(context: Dict[str, Any], follow_up_question: Optional[str] = None) -> str:
+    """Construct the structured user prompt from all available case context and RAG documents."""
     tx = context.get("transaction", {})
     ml_prob = context.get("ml_probability", 0.0)
     final_risk = context.get("final_risk_level", "UNKNOWN")
@@ -184,6 +294,20 @@ Account History Context:
     else:
         history_block = "\nAccount History Context:\n  - No prior transaction history found for this account."
 
+    # RAG Retrieval
+    query_terms = f"{tx.get('type')} amount {tx.get('amount')} {final_risk} " + " ".join(policy_reasons)
+    if follow_up_question:
+        query_terms += f" {follow_up_question}"
+    
+    rag_docs = _rag_retriever.retrieve(query_terms, top_k=2)
+    rag_block = ""
+    if rag_docs:
+        rag_items = [
+            f"  • [{d['id']} - {d['title']}]: {d['content']}"
+            for d in rag_docs
+        ]
+        rag_block = "\nRELEVANT COMPLIANCE & FRAUD REGULATORY GUIDELINES (RAG Context):\n" + "\n".join(rag_items) + "\n"
+
     prompt = f"""Please explain why the following transaction was flagged by our fraud detection system.
 Write your explanation for a compliance analyst who needs to decide whether to approve, block, or escalate this transaction.
 
@@ -192,6 +316,7 @@ Write your explanation for a compliance analyst who needs to decide whether to a
 {signals_block}
 {rules_block}
 {history_block}
+{rag_block}
 
 Provide a clear, plain-English explanation (2-5 sentences) of why this transaction is suspicious, followed by your recommended action."""
 
@@ -452,14 +577,14 @@ class CopilotEngine:
             )
             return {"explanation": cached_text, "is_cached": True, "latency_ms": latency_ms, "error": None}
 
-        # 4. Build prompt
+        # 4. Build prompt with RAG context
         try:
             if follow_up_question and chat_history:
                 # Follow-up mode: pass history + new question
-                prompt = _build_prompt(context)
+                prompt = _build_prompt(context, follow_up_question=follow_up_question)
                 messages = list(chat_history) + [{"role": "user", "content": follow_up_question}]
             else:
-                prompt = _build_prompt(context)
+                prompt = _build_prompt(context, follow_up_question=follow_up_question)
                 messages = None
 
             # 5. Call API
