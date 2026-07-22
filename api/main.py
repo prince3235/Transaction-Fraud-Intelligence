@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 import random
 import logging
@@ -12,9 +13,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-
-import sqlite3
-from datetime import datetime, timezone
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +21,12 @@ from src.features import build_features, align_to_model_columns, load_json
 from src.risk_scoring import score_probability, apply_policy_overrides
 from src.alerts import create_alert, should_alert
 from src.storage import get_db_path, init_db, log_prediction, fetch_recent_logs
-from src.auth import authenticate, has_permission
+from src.auth import authenticate, has_permission, create_access_token, decode_access_token
 from src.rules_engine import evaluate_rules
+from src.db import SessionLocal
+from src.models import PredictionLog, CopilotLog
 
-# Default Anthropic model — env-overridable. claude-sonnet-4-6 is NOT a real
-# model ID; we use the env var or fall back to a valid public ID.
+# Default Anthropic model — env-overridable.
 ANTHROPIC_MODEL_NAME = os.environ.get(
     "ANTHROPIC_MODEL", "claude-sonnet-4-5"
 )
@@ -34,8 +34,6 @@ ANTHROPIC_MODEL_NAME = os.environ.get(
 app = FastAPI(title="Transaction Fraud Intelligence API", version="1.1.0")
 
 # ── CORS middleware ─────────────────────────────────────────────────────────
-# Allow the configured frontend origins (comma-separated in CORS_ORIGINS).
-# Default permits localhost Streamlit + Next.js dev servers.
 _DEFAULT_ORIGINS = (
     "http://localhost:8501,http://127.0.0.1:8501,"
     "http://localhost:3000,http://127.0.0.1:3000"
@@ -60,13 +58,8 @@ def get_current_user(
 ) -> dict:
     """
     Resolve the bearer token to a user dict.
-
-    The token is interpreted as a session token issued by `/auth/login`.
-    In this simplified implementation we accept the API_AUTH_TOKEN env var
-    (constant-time compared) and return the admin user. Real deployments should
-    swap this for a session-token table lookup (see src/auth.generate_session_token).
+    Supports JWT tokens, static API_AUTH_TOKEN, and demo username:password fallback.
     """
-    # Public endpoints bypass this via `dependencies=[]`; protected ones require it.
     if credentials is None or not credentials.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -75,15 +68,25 @@ def get_current_user(
         )
     token = credentials.credentials
 
-    # If a static admin API token is configured, accept it (constant-time).
+    # 1. Static API Token check (constant-time)
     api_token = os.environ.get("API_AUTH_TOKEN", "")
     if api_token:
         import hmac
         if hmac.compare_digest(token, api_token):
             return {"id": 0, "username": "api-client", "role": "Admin"}
 
-    # Otherwise treat token as username:password (demo convenience, never for prod)
-    # — this lets the Streamlit UI log in with the demo credentials.
+    # 2. Standard JWT token decoding & validation
+    jwt_payload = decode_access_token(token)
+    if jwt_payload and isinstance(jwt_payload, dict):
+        username = jwt_payload.get("sub") or jwt_payload.get("username")
+        if username:
+            return {
+                "id": jwt_payload.get("id", 0),
+                "username": username,
+                "role": jwt_payload.get("role", "Viewer"),
+            }
+
+    # 3. Demo username:password token fallback
     if ":" in token:
         username, password = token.split(":", 1)
         user = authenticate(DB_PATH, username, password)
@@ -95,6 +98,34 @@ def get_current_user(
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    """Authenticate user credentials and issue a signed JWT access token."""
+    user = authenticate(DB_PATH, req.username, req.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token_payload = {
+        "sub": user["username"],
+        "id": user["id"],
+        "role": user["role"],
+    }
+    access_token = create_access_token(token_payload)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user,
+    }
 
 
 def require_permission(permission: str):
@@ -215,7 +246,9 @@ def score_tx(tx_dict: dict):
     X = align_to_model_columns(X, model_columns)
 
     # ML probability
-    ml_prob = float(model.predict_proba(X)[:, 1][0])
+    import numpy as np
+    raw_probs = model.predict_proba(X)
+    ml_prob = float(np.asarray(raw_probs)[:, 1][0])
     base_risk = score_probability(ml_prob)
 
     # Policy override (static heuristics)
@@ -280,13 +313,16 @@ def score_tx(tx_dict: dict):
 
 
 @app.post("/predict")
-def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
+async def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
     tx_dict = tx.model_dump()
-    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = score_tx(tx_dict)
+    loop = asyncio.get_running_loop()
+    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = await loop.run_in_executor(
+        None, score_tx, tx_dict
+    )
 
     created_at = datetime.now(timezone.utc).isoformat()
 
-    # Log to SQLite
+    # Log to database via storage helper
     log_prediction(
         db_path=DB_PATH,
         created_at=created_at,
@@ -303,7 +339,7 @@ def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
     )
 
     return {
-        "ml_probability": ml_prob,  # no rounding
+        "ml_probability": ml_prob,
         "ml_risk_score": base_risk.risk_score,
         "ml_risk_level": base_risk.risk_level,
         "final_risk_score": final_risk.risk_score,
@@ -317,11 +353,13 @@ def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
 
 
 @app.post("/debug/predict")
-def debug_predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
+async def debug_predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
     tx_dict = tx.model_dump()
-    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = score_tx(tx_dict)
+    loop = asyncio.get_running_loop()
+    X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = await loop.run_in_executor(
+        None, score_tx, tx_dict
+    )
 
-    # Only show selected important engineered features (not full row)
     cols_to_show = [
         "amount",
         "oldbalanceOrg",
@@ -366,8 +404,6 @@ def recent_logs(limit: int = 50, user: dict = Depends(get_current_user)):
 def seed_logs(count: int = 1000, user: dict = Depends(require_permission("manage_users"))):
     import pandas as pd
     import json
-    import sqlite3
-    from datetime import datetime, timezone
 
     X_TEST_PATH = BASE_DIR / "data" / "processed" / "X_test.csv"
     X_test = pd.read_csv(X_TEST_PATH)
@@ -382,7 +418,7 @@ def seed_logs(count: int = 1000, user: dict = Depends(require_permission("manage
     offset_minutes = random.randint(0, 60*24*7)
     created_at = (datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)).isoformat()
 
-    rows = []
+    db_objects = []
     for i, (_, row) in enumerate(sample_df.iterrows()):
         ml_prob = float(ml_probs[i])
         base_risk = score_probability(ml_prob)
@@ -409,33 +445,29 @@ def seed_logs(count: int = 1000, user: dict = Depends(require_permission("manage
 
         tx = {k: float(v) if isinstance(v, (float, int)) else str(v) for k, v in features_dict.items() if k in ["step","amount","oldbalanceOrg","newbalanceOrig","oldbalanceDest","newbalanceDest"]}
 
-        rows.append((
-            created_at, json.dumps(tx),
-            float(ml_prob), str(base_risk.risk_level), int(base_risk.risk_score),
-            str(final_risk.risk_level), int(final_risk.risk_score),
-            1 if (final_risk.risk_level != base_risk.risk_level) else 0,
-            json.dumps(policy_reasons),
-            int(features_dict.get("suspicious_signal_count", 0)),
-            json.dumps(alert) if alert else None,
-            "APPROVED" if final_risk.risk_level == "LOW" else "PENDING_REVIEW"
-        ))
+        log_entry = PredictionLog(
+            created_at=created_at,
+            transaction_json=tx,
+            ml_probability=float(ml_prob),
+            ml_risk_level=str(base_risk.risk_level),
+            ml_risk_score=int(base_risk.risk_score),
+            final_risk_level=str(final_risk.risk_level),
+            final_risk_score=int(final_risk.risk_score),
+            policy_override_applied=(final_risk.risk_level != base_risk.risk_level),
+            policy_reasons_json=policy_reasons,
+            suspicious_signal_count=int(features_dict.get("suspicious_signal_count", 0)),
+            alert_json=alert,
+            status="APPROVED" if final_risk.risk_level == "LOW" else "PENDING_REVIEW",
+        )
+        db_objects.append(log_entry)
 
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cur = con.cursor()
-    cur.executemany(
-        """INSERT INTO prediction_logs (
-            created_at, transaction_json,
-            ml_probability, ml_risk_level, ml_risk_score,
-            final_risk_level, final_risk_score,
-            policy_override_applied, policy_reasons_json,
-            suspicious_signal_count, alert_json, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        rows
-    )
-    con.commit()
-    con.close()
-
-    return {"status": "ok", "inserted": len(rows)}    
+    db = SessionLocal()
+    try:
+        db.bulk_save_objects(db_objects)
+        db.commit()
+        return {"status": "ok", "inserted": len(db_objects)}
+    finally:
+        db.close()
 
 
 class ActionIn(BaseModel):
@@ -445,85 +477,79 @@ class ActionIn(BaseModel):
 def log_action(log_id: int, action: ActionIn, user: dict = Depends(require_permission("manage_cases"))):
     if action.status not in ("APPROVED", "BLOCKED"):
         raise HTTPException(status_code=422, detail="Invalid status — must be APPROVED or BLOCKED")
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cur = con.cursor()
-    cur.execute("UPDATE prediction_logs SET status = ? WHERE id = ?", (action.status, int(log_id)))
-    con.commit()
-    con.close()
-    return {"status": "ok", "id": log_id, "new_status": action.status}
+    
+    db = SessionLocal()
+    try:
+        log_entry = db.query(PredictionLog).filter(PredictionLog.id == int(log_id)).first()
+        if not log_entry:
+            raise HTTPException(status_code=404, detail="Log entry not found")
+        log_entry.status = action.status
+        db.commit()
+        return {"status": "ok", "id": log_id, "new_status": action.status}
+    finally:
+        db.close()
 
 # ========== ADMIN & MONITORING ENDPOINTS ==========
 
 @app.get("/stats")
 def get_stats(user: dict = Depends(get_current_user)):
-    """Get system-level statistics for monitoring"""
-    import sqlite3
-    import pandas as pd
-    
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
-    
-    total = con.execute("SELECT COUNT(*) FROM prediction_logs").fetchone()[0]
-    
-    risk_dist = pd.read_sql_query(
-        "SELECT final_risk_level, COUNT(*) as count FROM prediction_logs GROUP BY final_risk_level",
-        con
-    ).to_dict(orient="records")
-    
-    override_rate = con.execute(
-        "SELECT AVG(policy_override_applied)*100 FROM prediction_logs"
-    ).fetchone()[0]
-    
-    avg_score = con.execute(
-        "SELECT AVG(final_risk_score) FROM prediction_logs"
-    ).fetchone()[0]
-    
-    con.close()
-    
-    return {
-        "total_scored": total,
-        "risk_distribution": risk_dist,
-        "override_rate_pct": round(override_rate, 2) if override_rate else 0,
-        "avg_risk_score": round(avg_score, 2) if avg_score else 0
-    }
+    """Get system-level statistics for monitoring using ORM."""
+    db = SessionLocal()
+    try:
+        total = db.query(func.count(PredictionLog.id)).scalar() or 0
+        
+        dist_query = (
+            db.query(PredictionLog.final_risk_level, func.count(PredictionLog.id))
+            .group_by(PredictionLog.final_risk_level)
+            .all()
+        )
+        risk_dist = [{"final_risk_level": level, "count": count} for level, count in dist_query]
+        
+        override_count = db.query(func.count(PredictionLog.id)).filter(PredictionLog.policy_override_applied == True).scalar() or 0
+        override_rate = (override_count / total * 100.0) if total > 0 else 0.0
+        
+        avg_score = db.query(func.avg(PredictionLog.final_risk_score)).scalar() or 0.0
+        
+        return {
+            "total_scored": total,
+            "risk_distribution": risk_dist,
+            "override_rate_pct": round(float(override_rate), 2),
+            "avg_risk_score": round(float(avg_score), 2)
+        }
+    finally:
+        db.close()
 
 
 @app.get("/logs/{log_id}/explain")
 def explain_log(log_id: int, user: dict = Depends(get_current_user)):
-    """Get detailed explanation for a specific log entry"""
-    import sqlite3
-    import json
-    
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cur = con.cursor()
-    
-    row = cur.execute(
-        """SELECT transaction_json, ml_probability, ml_risk_level, ml_risk_score,
-                  final_risk_level, final_risk_score, policy_override_applied, policy_reasons_json
-           FROM prediction_logs WHERE id = ?""",
-        (int(log_id),)
-    ).fetchone()
-    
-    con.close()
-    
-    if not row:
-        return {"error": "log not found"}
-    
-    return {
-        "log_id": log_id,
-        "transaction": json.loads(row[0]),
-        "ml": {
-            "probability": row[1],
-            "level": row[2],
-            "score": row[3]
-        },
-        "final": {
-            "level": row[4],
-            "score": row[5]
-        },
-        "override_applied": bool(row[6]),
-        "override_reasons": json.loads(row[7]) if row[7] else [],
-        "explanation": "ML model assessed base risk. Policy engine may have elevated it based on business rules."
-    }    
+    """Get detailed explanation for a specific log entry using ORM."""
+    db = SessionLocal()
+    try:
+        log_entry = db.query(PredictionLog).filter(PredictionLog.id == int(log_id)).first()
+        if not log_entry:
+            return {"error": "log not found"}
+        
+        tx_data = log_entry.transaction_json if isinstance(log_entry.transaction_json, dict) else json.loads(log_entry.transaction_json or "{}")
+        reasons_data = log_entry.policy_reasons_json if isinstance(log_entry.policy_reasons_json, (list, dict)) else json.loads(log_entry.policy_reasons_json or "[]")
+
+        return {
+            "log_id": log_id,
+            "transaction": tx_data,
+            "ml": {
+                "probability": log_entry.ml_probability,
+                "level": log_entry.ml_risk_level,
+                "score": log_entry.ml_risk_score
+            },
+            "final": {
+                "level": log_entry.final_risk_level,
+                "score": log_entry.final_risk_score
+            },
+            "override_applied": bool(log_entry.policy_override_applied),
+            "override_reasons": reasons_data,
+            "explanation": "ML model assessed base risk. Policy engine may have elevated it based on business rules."
+        }
+    finally:
+        db.close()
 
 
 # ========== LLM COPILOT ENDPOINTS ==========
@@ -534,7 +560,6 @@ class CopilotRequest(BaseModel):
     follow_up: Optional[str] = None
 
     class Config:
-        # Allow either prediction_log_id OR case_id
         pass
 
 
@@ -546,10 +571,6 @@ def copilot_explain(req: CopilotRequest, user: dict = Depends(get_current_user))
     Accepts either { "prediction_log_id": int } or { "case_id": str }.
     Optionally include { "follow_up": "Has this user been flagged before?" }
     for follow-up questions.
-
-    Returns plain-English explanation written for compliance analyst audience.
-    Logs every query + response to copilot_logs for regulatory audit trail.
-    Falls back gracefully if LLM API is unavailable (never blocks analyst workflow).
     """
     if not req.prediction_log_id and not req.case_id:
         return {"error": "Either prediction_log_id or case_id is required.", "explanation": None}
@@ -558,7 +579,6 @@ def copilot_explain(req: CopilotRequest, user: dict = Depends(get_current_user))
         from src.llm_copilot import CopilotEngine
         from src.db_migrations import run_migrations
 
-        # Ensure copilot_logs table exists
         run_migrations(DB_PATH)
 
         engine = CopilotEngine(db_path=DB_PATH, project_root=BASE_DIR)
@@ -579,7 +599,6 @@ def copilot_explain(req: CopilotRequest, user: dict = Depends(get_current_user))
         }
 
     except Exception as exc:
-        # Graceful degradation: never let LLM issues block the analyst UI
         import traceback
         logger.error("Copilot endpoint error: %s\n%s", exc, traceback.format_exc())
         return {
@@ -594,19 +613,24 @@ def copilot_explain(req: CopilotRequest, user: dict = Depends(get_current_user))
 
 @app.get("/copilot/logs")
 def get_copilot_logs(limit: int = 50, user: dict = Depends(require_permission("view_audit"))):
-    """Fetch recent copilot query audit logs (admin/compliance use)."""
+    """Fetch recent copilot query audit logs using ORM."""
+    db = SessionLocal()
     try:
-        con = sqlite3.connect(DB_PATH, check_same_thread=False)
-        rows = con.execute(
-            """SELECT id, case_id, prediction_log_id, llm_response, model_used,
-                      tokens_used, latency_ms, is_cached, error, created_at
-               FROM copilot_logs ORDER BY id DESC LIMIT ?""",
-            (int(limit),),
-        ).fetchall()
-        con.close()
-
-        cols = ["id", "case_id", "prediction_log_id", "llm_response", "model_used",
-                "tokens_used", "latency_ms", "is_cached", "error", "created_at"]
-        return {"count": len(rows), "logs": [dict(zip(cols, r)) for r in rows]}
+        logs = db.query(CopilotLog).order_by(CopilotLog.id.desc()).limit(int(limit)).all()
+        log_list = [{
+            "id": l.id,
+            "case_id": l.case_id,
+            "prediction_log_id": l.prediction_log_id,
+            "llm_response": l.llm_response,
+            "model_used": l.model_used,
+            "tokens_used": l.tokens_used,
+            "latency_ms": l.latency_ms,
+            "is_cached": l.is_cached,
+            "error": l.error,
+            "created_at": l.created_at
+        } for l in logs]
+        return {"count": len(log_list), "logs": log_list}
     except Exception as exc:
         return {"error": str(exc), "logs": []}
+    finally:
+        db.close()
