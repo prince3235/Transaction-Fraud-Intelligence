@@ -262,6 +262,7 @@ def authenticate(db_path: Path, username: str, password: str) -> Optional[Dict[s
             "username": user.username,
             "email": user.email,
             "role": user.role,
+            "organization_id": user.organization_id,
             "is_active": user.is_active,
             "created_at": user.created_at,
             "last_login": user.last_login
@@ -282,6 +283,7 @@ def get_user_by_username(db_path: Path, username: str) -> Optional[Dict[str, Any
             "username": user.username,
             "email": user.email,
             "role": user.role,
+            "organization_id": user.organization_id,
             "is_active": user.is_active,
             "created_at": user.created_at,
             "last_login": user.last_login

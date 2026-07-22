@@ -84,6 +84,7 @@ def get_current_user(
                 "id": jwt_payload.get("id", 0),
                 "username": username,
                 "role": jwt_payload.get("role", "Viewer"),
+                "organization_id": jwt_payload.get("organization_id"),
             }
 
     # 3. Demo username:password token fallback
@@ -98,6 +99,14 @@ def get_current_user(
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def get_current_tenant(user: dict = Depends(get_current_user)) -> Optional[int]:
+    """
+    FastAPI dependency that resolves the current tenant (organization_id)
+    from authenticated user claims. Returns None for global system admins.
+    """
+    return user.get("organization_id")
 
 
 class LoginRequest(BaseModel):
@@ -119,6 +128,7 @@ def login(req: LoginRequest):
         "sub": user["username"],
         "id": user["id"],
         "role": user["role"],
+        "organization_id": user.get("organization_id"),
     }
     access_token = create_access_token(token_payload)
     return {

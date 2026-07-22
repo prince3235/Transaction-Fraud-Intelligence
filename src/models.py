@@ -18,9 +18,17 @@ class FlexibleJSON(TypeDecorator):
         else:
             return dialect.type_descriptor(JSON())
 
+class Organization(Base):
+    __tablename__ = "organizations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, unique=True, nullable=False)
+    created_at = Column(String, nullable=False)
+
 class PredictionLog(Base):
     __tablename__ = "prediction_logs"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     created_at = Column(String, nullable=False)
     transaction_json = Column(FlexibleJSON, nullable=False)
     ml_probability = Column(Float, nullable=False)
@@ -37,6 +45,7 @@ class PredictionLog(Base):
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     username = Column(String, unique=True, nullable=False)
     email = Column(String)
     password_hash = Column(String, nullable=False)
@@ -48,6 +57,7 @@ class User(Base):
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     username = Column(String, nullable=False)
     action = Column(String, nullable=False)
     entity_type = Column(String)
@@ -61,6 +71,7 @@ class AuditLog(Base):
 class FraudCase(Base):
     __tablename__ = "fraud_cases"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     case_id = Column(String, unique=True, nullable=False)
     prediction_log_id = Column(Integer, ForeignKey("prediction_logs.id"))
     status = Column(String, nullable=False, default="Open")
@@ -78,6 +89,7 @@ class FraudCase(Base):
 class BusinessRule(Base):
     __tablename__ = "business_rules"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(String, nullable=False, default="")
     rule_type = Column(String, nullable=False, default="threshold")
