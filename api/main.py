@@ -31,7 +31,26 @@ ANTHROPIC_MODEL_NAME = os.environ.get(
     "ANTHROPIC_MODEL", "claude-sonnet-4-5"
 )
 
-app = FastAPI(title="Transaction Fraud Intelligence API", version="1.1.0")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager: Start and stop background drift scheduler gracefully."""
+    try:
+        from src.retrain_trigger import start_scheduler
+        start_scheduler()
+    except Exception as exc:
+        logger.warning("Failed to start drift scheduler (non-fatal): %s", exc)
+    yield
+    try:
+        from src.retrain_trigger import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="Transaction Fraud Intelligence API", version="1.1.0", lifespan=lifespan)
 
 # ── CORS middleware ─────────────────────────────────────────────────────────
 _DEFAULT_ORIGINS = (
@@ -188,25 +207,7 @@ DB_PATH = get_db_path(BASE_DIR)
 init_db(DB_PATH)
 
 
-# ── Startup: start drift scheduler ───────────────────────────────────────────
-@app.on_event("startup")
-def _start_background_jobs():
-    """Start the drift-monitor scheduler on app startup (was previously dead code)."""
-    try:
-        from src.retrain_trigger import start_scheduler
-        start_scheduler()
-    except Exception as exc:
-        logger.warning("Failed to start drift scheduler (non-fatal): %s", exc)
 
-
-@app.on_event("shutdown")
-def _stop_background_jobs():
-    """Gracefully stop the scheduler on app shutdown."""
-    try:
-        from src.retrain_trigger import stop_scheduler
-        stop_scheduler()
-    except Exception:
-        pass
 
 
 class TransactionIn(BaseModel):
@@ -568,9 +569,6 @@ class CopilotRequest(BaseModel):
     prediction_log_id: Optional[int] = None
     case_id: Optional[str] = None
     follow_up: Optional[str] = None
-
-    class Config:
-        pass
 
 
 @app.post("/copilot/explain")
