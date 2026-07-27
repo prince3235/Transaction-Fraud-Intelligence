@@ -266,7 +266,7 @@ if __name__ == "__main__":
     print("\n[6/6] Seeding model registry...")
     seed_model_registry(DB_PATH)
 
-    print("\n✅ Enterprise seeding complete!")
+    print("\n[ok] Enterprise seeding complete!")
     print("\nDemo credentials:")
     print("  admin / admin123        (Full access)")
     print("  analyst / analyst123    (Analyst access)")
