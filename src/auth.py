@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import jwt
 
-from src.db import SessionLocal
+from src.application.ports.uow import AbstractUnitOfWork
 from src.models import User, AuditLog
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,7 @@ def generate_session_token() -> str:
 
 # ── User management ───────────────────────────────────────────────────────────
 
-def seed_demo_users(db_path: Path) -> None:
+def seed_demo_users(uow: AbstractUnitOfWork) -> None:
     """
     Seed the database with demo users — ONLY when SEED_DEMO_USERS=1.
     Passwords are read from DEMO_USER_<NAME>_PASSWORD env vars (random fallback).
@@ -219,11 +219,10 @@ def seed_demo_users(db_path: Path) -> None:
     if os.environ.get("SEED_DEMO_USERS", "0") != "1":
         logger.info("Skipping demo user seeding (set SEED_DEMO_USERS=1 to enable).")
         return
-    db = SessionLocal()
-    try:
+    with uow:
         now = _now()
         for user_data in _demo_users():
-            exists = db.query(User).filter(User.username == user_data["username"]).first()
+            exists = uow.users.get_by_username(user_data["username"])
             if not exists:
                 new_user = User(
                     username=user_data["username"],
@@ -233,29 +232,25 @@ def seed_demo_users(db_path: Path) -> None:
                     is_active=True,
                     created_at=now
                 )
-                db.add(new_user)
+                uow.users.add(new_user)
             else:
                 # Optionally re-hash if user exists but has a legacy SHA-256 hash
                 if len(exists.password_hash) == 64:
                     exists.password_hash = hash_password(user_data["password"])
-        db.commit()
-    finally:
-        db.close()
+        uow.commit()
 
 
-def authenticate(db_path: Path, username: str, password: str) -> Optional[Dict[str, Any]]:
+def authenticate(uow: AbstractUnitOfWork, username: str, password: str) -> Optional[Dict[str, Any]]:
     """
     Authenticate a user by username and password.
     """
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == username, User.is_active == True).first()
-        if not user or not verify_password(password, user.password_hash):
+    with uow:
+        user = uow.users.get_by_username(username)
+        if not user or not user.is_active or not verify_password(password, user.password_hash):
             return None
             
         user.last_login = _now()
-        db.commit()
-        db.refresh(user)
+        uow.commit()
         
         return {
             "id": user.id,
@@ -267,15 +262,12 @@ def authenticate(db_path: Path, username: str, password: str) -> Optional[Dict[s
             "created_at": user.created_at,
             "last_login": user.last_login
         }
-    finally:
-        db.close()
 
 
-def get_user_by_username(db_path: Path, username: str) -> Optional[Dict[str, Any]]:
+def get_user_by_username(uow: AbstractUnitOfWork, username: str) -> Optional[Dict[str, Any]]:
     """Fetch a user by username (without password hash)."""
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.username == username).first()
+    with uow:
+        user = uow.users.get_by_username(username)
         if not user:
             return None
         return {
@@ -288,15 +280,12 @@ def get_user_by_username(db_path: Path, username: str) -> Optional[Dict[str, Any
             "created_at": user.created_at,
             "last_login": user.last_login
         }
-    finally:
-        db.close()
 
 
-def list_users(db_path: Path) -> List[Dict[str, Any]]:
+def list_users(uow: AbstractUnitOfWork) -> List[Dict[str, Any]]:
     """Return all users (without password hashes)."""
-    db = SessionLocal()
-    try:
-        users = db.query(User).order_by(User.id).all()
+    with uow:
+        users = uow.users.get_all()
         return [{
             "id": u.id,
             "username": u.username,
@@ -306,8 +295,6 @@ def list_users(db_path: Path) -> List[Dict[str, Any]]:
             "created_at": u.created_at,
             "last_login": u.last_login
         } for u in users]
-    finally:
-        db.close()
 
 
 # ── Permission checking ───────────────────────────────────────────────────────
@@ -326,7 +313,7 @@ def get_role_info(role: str) -> Dict[str, Any]:
 # ── Audit logging ─────────────────────────────────────────────────────────────
 
 def log_audit_event(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     username: str,
     action: str,
     entity_type: Optional[str] = None,
@@ -337,8 +324,7 @@ def log_audit_event(
     reason: Optional[str] = None,
 ) -> None:
     """Write an enterprise audit log entry."""
-    db = SessionLocal()
-    try:
+    with uow:
         log = AuditLog(
             username=username,
             action=action,
@@ -350,28 +336,25 @@ def log_audit_event(
             reason=reason,
             timestamp=_now()
         )
-        db.add(log)
-        db.commit()
-    finally:
-        db.close()
+        uow.audit_logs.add(log)
+        uow.commit()
 
 
 def fetch_audit_logs(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     username: Optional[str] = None,
     entity_type: Optional[str] = None,
     limit: int = 200,
 ) -> List[Dict[str, Any]]:
     """Fetch audit log entries with optional filters."""
-    db = SessionLocal()
-    try:
-        query = db.query(AuditLog)
+    with uow:
+        filters = {}
         if username:
-            query = query.filter(AuditLog.username == username)
+            filters["username"] = username
         if entity_type:
-            query = query.filter(AuditLog.entity_type == entity_type)
+            filters["entity_type"] = entity_type
             
-        logs = query.order_by(AuditLog.id.desc()).limit(limit).all()
+        logs = uow.audit_logs.get_recent(limit=limit, **filters)
         return [{
             "id": log.id,
             "username": log.username,
@@ -384,5 +367,3 @@ def fetch_audit_logs(
             "reason": log.reason,
             "timestamp": log.timestamp
         } for log in logs]
-    finally:
-        db.close()

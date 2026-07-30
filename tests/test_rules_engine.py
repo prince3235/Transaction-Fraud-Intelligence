@@ -1,34 +1,20 @@
 import json
 from pathlib import Path
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from src.rules_engine import create_rule, _evaluate_single_rule, seed_default_rules, evaluate_rules
+from src.infrastructure.persistence.uow import SQLAlchemyUnitOfWork
+from src.models import Base
 
 @pytest.fixture
-def temp_db(tmp_path):
+def temp_uow(tmp_path):
     db_file = tmp_path / "test_rules.db"
-    # To use rules_engine properly, it expects the db schema to exist.
-    import sqlite3
-    con = sqlite3.connect(db_file)
-    cur = con.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS business_rules (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT UNIQUE NOT NULL,
-            description     TEXT NOT NULL DEFAULT '',
-            rule_type       TEXT NOT NULL DEFAULT 'threshold',
-            condition_json  TEXT NOT NULL DEFAULT '{}',
-            action          TEXT NOT NULL DEFAULT 'flag',
-            risk_level_bump TEXT NOT NULL DEFAULT 'MEDIUM',
-            priority        INTEGER NOT NULL DEFAULT 50,
-            is_active       INTEGER NOT NULL DEFAULT 1,
-            triggered_count INTEGER NOT NULL DEFAULT 0,
-            created_at      TEXT NOT NULL,
-            updated_at      TEXT NOT NULL
-        )
-    """)
-    con.commit()
-    con.close()
-    return db_file
+    engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return SQLAlchemyUnitOfWork(session_factory=SessionLocal)
 
 def test_rule_matching_simpleeval():
     rule = {
@@ -40,7 +26,7 @@ def test_rule_matching_simpleeval():
     # Should not match
     assert _evaluate_single_rule(rule, {"amount": 40000, "type_risk_score": 4}) is False
 
-def test_malicious_payload_rejected_at_creation(temp_db):
+def test_malicious_payload_rejected_at_creation(temp_uow):
     malicious_rules = [
         "__import__('os').system('ls')",
         "open('test.txt', 'w')",
@@ -50,7 +36,7 @@ def test_malicious_payload_rejected_at_creation(temp_db):
     for payload in malicious_rules:
         with pytest.raises(ValueError, match="Invalid expression|Invalid rule"):
             create_rule(
-                db_path=temp_db,
+                uow=temp_uow,
                 name=f"Malicious {payload}",
                 description="Test",
                 rule_type="compound",
@@ -60,10 +46,10 @@ def test_malicious_payload_rejected_at_creation(temp_db):
                 priority=50
             )
 
-def test_malformed_rule_rejected(temp_db):
+def test_malformed_rule_rejected(temp_uow):
     with pytest.raises(ValueError, match="Invalid rule syntax"):
         create_rule(
-            db_path=temp_db,
+            uow=temp_uow,
             name="Bad Syntax",
             description="Test",
             rule_type="compound",

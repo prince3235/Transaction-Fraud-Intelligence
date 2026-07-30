@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import simpleeval
-from src.db import SessionLocal
+from src.application.ports.uow import AbstractUnitOfWork
 from src.models import BusinessRule
 
 
@@ -117,21 +117,26 @@ def _now() -> str:
 
 # ── Database operations ───────────────────────────────────────────────────────
 
-def seed_default_rules(db_path: Path) -> None:
+def seed_default_rules(uow: Optional[Any] = None) -> None:
     """
     Insert default rules if they don't already exist.
     Safe to call on every startup.
 
     Args:
-        db_path: Path to SQLite database. (ignored, kept for signature compat)
+        uow: Unit of Work for database operations (optional).
     """
-    db = SessionLocal()
+    if uow is None or not hasattr(uow, "business_rules"):
+        from src.infrastructure.persistence.uow import SQLAlchemyUnitOfWork
+        uow = SQLAlchemyUnitOfWork()
+
     now = _now()
     
-    try:
+    with uow:
+        existing_rules = uow.business_rules.get_all()
+        existing_names = {r.name for r in existing_rules}
+
         for rule_data in DEFAULT_RULES:
-            exists = db.query(BusinessRule).filter(BusinessRule.name == rule_data["name"]).first()
-            if not exists:
+            if rule_data["name"] not in existing_names:
                 new_rule = BusinessRule(
                     name=rule_data["name"],
                     description=rule_data["description"],
@@ -145,23 +150,21 @@ def seed_default_rules(db_path: Path) -> None:
                     created_at=now,
                     updated_at=now
                 )
-                db.add(new_rule)
-        db.commit()
-    finally:
-        db.close()
+                uow.business_rules.add(new_rule)
+        uow.commit()
 
 
-def list_rules(db_path: Path, active_only: bool = False) -> List[Dict[str, Any]]:
+def list_rules(uow: AbstractUnitOfWork, active_only: bool = False) -> List[Dict[str, Any]]:
     """
     List all business rules.
     """
-    db = SessionLocal()
-    try:
-        query = db.query(BusinessRule)
+    with uow:
+        # Instead of raw query, we use the repo. We can filter in Python for now
+        rules = uow.business_rules.get_all()
         if active_only:
-            query = query.filter(BusinessRule.is_active == True)
-        
-        rules = query.order_by(BusinessRule.priority.desc(), BusinessRule.id.asc()).all()
+            rules = [r for r in rules if r.is_active]
+            
+        rules = sorted(rules, key=lambda r: (-r.priority, r.id))
         return [{
             "id": r.id,
             "name": r.name,
@@ -176,20 +179,16 @@ def list_rules(db_path: Path, active_only: bool = False) -> List[Dict[str, Any]]
             "created_at": r.created_at,
             "updated_at": r.updated_at
         } for r in rules]
-    finally:
-        db.close()
 
 
-def toggle_rule(db_path: Path, rule_id: int, is_active: bool) -> Optional[Dict[str, Any]]:
+def toggle_rule(uow: AbstractUnitOfWork, rule_id: int, is_active: bool) -> Optional[Dict[str, Any]]:
     """Enable or disable a business rule."""
-    db = SessionLocal()
-    try:
-        rule = db.query(BusinessRule).filter(BusinessRule.id == rule_id).first()
+    with uow:
+        rule = uow.business_rules.get(rule_id)
         if rule:
             rule.is_active = is_active
             rule.updated_at = _now()
-            db.commit()
-            db.refresh(rule)
+            uow.commit()
             return {
                 "id": rule.id,
                 "name": rule.name,
@@ -205,12 +204,10 @@ def toggle_rule(db_path: Path, rule_id: int, is_active: bool) -> Optional[Dict[s
                 "updated_at": rule.updated_at
             }
         return None
-    finally:
-        db.close()
 
 
 def create_rule(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     name: str,
     description: str,
     rule_type: str,
@@ -239,8 +236,7 @@ def create_rule(
         raise ValueError(f"Invalid rule: {e}")
 
     now = _now()
-    db = SessionLocal()
-    try:
+    with uow:
         rule = BusinessRule(
             name=name,
             description=description,
@@ -254,9 +250,8 @@ def create_rule(
             created_at=now,
             updated_at=now
         )
-        db.add(rule)
-        db.commit()
-        db.refresh(rule)
+        uow.business_rules.add(rule)
+        uow.commit()
         return {
             "id": rule.id,
             "name": rule.name,
@@ -271,8 +266,6 @@ def create_rule(
             "created_at": rule.created_at,
             "updated_at": rule.updated_at
         }
-    finally:
-        db.close()
 
 
 # ── Rule evaluation ───────────────────────────────────────────────────────────
@@ -312,14 +305,14 @@ def _evaluate_single_rule(rule: Dict[str, Any], features: Dict[str, Any]) -> boo
 
 
 def evaluate_rules(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     features: Dict[str, Any],
     current_risk_level: str = "LOW",
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Evaluate all active business rules against a feature set.
     """
-    rules = list_rules(db_path, active_only=True)
+    rules = list_rules(uow, active_only=True)
     triggered: List[Dict[str, Any]] = []
     final_level = current_risk_level
 
@@ -331,14 +324,11 @@ def evaluate_rules(
                 final_level = bump
 
     if triggered:
-        db = SessionLocal()
-        try:
+        with uow:
             for rule in triggered:
-                db_rule = db.query(BusinessRule).filter(BusinessRule.id == rule["id"]).first()
+                db_rule = uow.business_rules.get(rule["id"])
                 if db_rule:
                     db_rule.triggered_count += 1
-            db.commit()
-        finally:
-            db.close()
+            uow.commit()
 
     return final_level, triggered

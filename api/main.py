@@ -24,6 +24,9 @@ from src.storage import get_db_path, init_db, log_prediction, fetch_recent_logs
 from src.auth import authenticate, has_permission, create_access_token, decode_access_token
 from src.rules_engine import evaluate_rules
 from src.db import SessionLocal
+from api.dependencies import get_uow
+from src.application.ports.uow import AbstractUnitOfWork
+from src.infrastructure.persistence.uow import SQLAlchemyUnitOfWork
 from src.models import PredictionLog, CopilotLog
 
 # Default Anthropic model — env-overridable.
@@ -74,6 +77,7 @@ _security = HTTPBearer(auto_error=False)
 
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_security),
+    uow: AbstractUnitOfWork = Depends(get_uow),
 ) -> dict:
     """
     Resolve the bearer token to a user dict.
@@ -109,7 +113,7 @@ def get_current_user(
     # 3. Demo username:password token fallback
     if ":" in token:
         username, password = token.split(":", 1)
-        user = authenticate(DB_PATH, username, password)
+        user = authenticate(uow, username, password)
         if user:
             return user
 
@@ -134,9 +138,9 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/auth/login")
-def login(req: LoginRequest):
+def login(req: LoginRequest, uow: AbstractUnitOfWork = Depends(get_uow)):
     """Authenticate user credentials and issue a signed JWT access token."""
-    user = authenticate(DB_PATH, req.username, req.password)
+    user = authenticate(uow, req.username, req.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -277,7 +281,7 @@ def score_tx(tx_dict: dict):
     rule_hits = []
     try:
         rule_final_level, triggered_rules = evaluate_rules(
-            DB_PATH, features_dict, current_risk_level=final_risk.risk_level
+            uow, features_dict, current_risk_level=final_risk.risk_level
         )
         for hit in triggered_rules:
             rule_hits.append({
@@ -324,7 +328,7 @@ def score_tx(tx_dict: dict):
 
 
 @app.post("/predict")
-async def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
+async def predict(tx: TransactionIn, user: dict = Depends(get_current_user), uow: AbstractUnitOfWork = Depends(get_uow)):
     tx_dict = tx.model_dump()
     loop = asyncio.get_running_loop()
     X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = await loop.run_in_executor(
@@ -335,7 +339,7 @@ async def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
 
     # Log to database via storage helper
     log_prediction(
-        db_path=DB_PATH,
+        uow=uow,
         created_at=created_at,
         transaction=tx_dict,
         ml_probability=ml_prob,
@@ -364,7 +368,7 @@ async def predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
 
 
 @app.post("/debug/predict")
-async def debug_predict(tx: TransactionIn, user: dict = Depends(get_current_user)):
+async def debug_predict(tx: TransactionIn, user: dict = Depends(get_current_user), uow: AbstractUnitOfWork = Depends(get_uow)):
     tx_dict = tx.model_dump()
     loop = asyncio.get_running_loop()
     X, ml_prob, base_risk, final_risk, policy_reasons, alert, ssc, rule_hits = await loop.run_in_executor(
@@ -407,8 +411,8 @@ async def debug_predict(tx: TransactionIn, user: dict = Depends(get_current_user
 
 
 @app.get("/logs/recent")
-def recent_logs(limit: int = 50, user: dict = Depends(get_current_user)):
-    return {"limit": limit, "items": fetch_recent_logs(DB_PATH, limit=limit)}
+def recent_logs(limit: int = 50, user: dict = Depends(get_current_user), uow: AbstractUnitOfWork = Depends(get_uow)):
+    return {"limit": limit, "items": fetch_recent_logs(uow, limit=limit)}
 
 
 @app.post("/admin/seed-logs")
@@ -589,7 +593,7 @@ def copilot_explain(req: CopilotRequest, user: dict = Depends(get_current_user))
 
         run_migrations(DB_PATH)
 
-        engine = CopilotEngine(db_path=DB_PATH, project_root=BASE_DIR)
+        engine = CopilotEngine(uow=uow, project_root=BASE_DIR)
         result = engine.explain(
             prediction_log_id=req.prediction_log_id,
             case_id=req.case_id,

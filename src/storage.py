@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 from src.db import SessionLocal, engine
 from src.models import Base, PredictionLog
 
+from src.application.ports.uow import AbstractUnitOfWork
+
 def get_db_path(base_dir: Path = None) -> Path:
     # Kept for backward compatibility if any module imports it
     if base_dir is None:
@@ -13,11 +15,11 @@ def get_db_path(base_dir: Path = None) -> Path:
     return base_dir / "data" / "app_db" / "fraud_intelligence.db"
 
 def init_db(db_path: Path = None) -> None:
-    # Now Alembic handles schema generation, but for tests or fallback:
-    Base.metadata.create_all(bind=engine)
+    from src.db_migrations import run_migrations
+    run_migrations()
 
 def log_prediction(
-    db_path: Path, # Ignored, kept for signature compat
+    uow: AbstractUnitOfWork,
     created_at: str,
     transaction: Dict[str, Any],
     ml_probability: float,
@@ -31,8 +33,7 @@ def log_prediction(
     alert: Optional[Dict[str, Any]] = None,
     status: Optional[str] = None,
 ) -> None:
-    db = SessionLocal()
-    try:
+    with uow:
         log = PredictionLog(
             created_at=created_at,
             transaction_json=transaction,
@@ -47,15 +48,12 @@ def log_prediction(
             alert_json=alert,
             status=status if status is not None else ("APPROVED" if final_risk_level == "LOW" else "PENDING_REVIEW")
         )
-        db.add(log)
-        db.commit()
-    finally:
-        db.close()
+        uow.prediction_logs.add(log)
+        uow.commit()
 
-def fetch_recent_logs(db_path: Path, limit: int = 50) -> List[Dict[str, Any]]:
-    db = SessionLocal()
-    try:
-        logs = db.query(PredictionLog).order_by(PredictionLog.id.desc()).limit(limit).all()
+def fetch_recent_logs(uow: AbstractUnitOfWork, limit: int = 50) -> List[Dict[str, Any]]:
+    with uow:
+        logs = uow.prediction_logs.get_recent(limit=limit)
         out = []
         for r in logs:
             out.append(
@@ -76,5 +74,3 @@ def fetch_recent_logs(db_path: Path, limit: int = 50) -> List[Dict[str, Any]]:
                 }
             )
         return out
-    finally:
-        db.close()

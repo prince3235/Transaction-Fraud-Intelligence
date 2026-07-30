@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.db import SessionLocal
+from src.application.ports.uow import AbstractUnitOfWork
 from src.models import FraudCase
 
 
@@ -31,11 +31,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _generate_case_id(db: SessionLocal) -> str:
+def _generate_case_id(uow: AbstractUnitOfWork) -> str:
     """Generate a unique sequential case ID in format FCS-YYYY-XXXXXX."""
     year = datetime.now(timezone.utc).year
     prefix = f"FCS-{year}-"
-    count = db.query(FraudCase).filter(FraudCase.case_id.like(f"{prefix}%")).count()
+    # For now, we can use the session directly from the repo for this specific query
+    count = uow.fraud_cases.session.query(FraudCase).filter(FraudCase.case_id.like(f"{prefix}%")).count()
     return f"{prefix}{count + 1:06d}"
 
 
@@ -62,7 +63,7 @@ def _model_to_dict(model: FraudCase) -> Dict[str, Any]:
 # ── Core CRUD ────────────────────────────────────────────────────────────────
 
 def create_case(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     prediction_log_id: Optional[int],
     title: str,
     description: str,
@@ -84,9 +85,8 @@ def create_case(
         "note": f"Case opened with priority {priority}",
     }
 
-    db = SessionLocal()
-    try:
-        case_id = _generate_case_id(db)
+    with uow:
+        case_id = _generate_case_id(uow)
         case = FraudCase(
             case_id=case_id,
             prediction_log_id=prediction_log_id,
@@ -101,36 +101,27 @@ def create_case(
             created_at=now,
             updated_at=now
         )
-        db.add(case)
-        db.commit()
-        db.refresh(case)
+        uow.fraud_cases.add(case)
+        uow.commit()
         return _model_to_dict(case)
-    finally:
-        db.close()
 
 
-def get_case_by_id(db_path: Path, case_row_id: int) -> Optional[Dict[str, Any]]:
+def get_case_by_id(uow: AbstractUnitOfWork, case_row_id: int) -> Optional[Dict[str, Any]]:
     """Fetch a single case by its integer primary key."""
-    db = SessionLocal()
-    try:
-        case = db.query(FraudCase).filter(FraudCase.id == case_row_id).first()
+    with uow:
+        case = uow.fraud_cases.get(case_row_id)
         return _model_to_dict(case) if case else None
-    finally:
-        db.close()
 
 
-def get_case_by_case_id(db_path: Path, case_id: str) -> Optional[Dict[str, Any]]:
+def get_case_by_case_id(uow: AbstractUnitOfWork, case_id: str) -> Optional[Dict[str, Any]]:
     """Fetch a single case by its human-readable case_id (FCS-YYYY-XXXXXX)."""
-    db = SessionLocal()
-    try:
-        case = db.query(FraudCase).filter(FraudCase.case_id == case_id).first()
+    with uow:
+        case = uow.fraud_cases.get_by_case_id(case_id)
         return _model_to_dict(case) if case else None
-    finally:
-        db.close()
 
 
 def list_cases(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     status: Optional[str] = None,
     priority: Optional[str] = None,
     assigned_to: Optional[str] = None,
@@ -139,9 +130,8 @@ def list_cases(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """List fraud cases with optional filters."""
-    db = SessionLocal()
-    try:
-        query = db.query(FraudCase)
+    with uow:
+        query = uow.fraud_cases.session.query(FraudCase)
         
         if status:
             query = query.filter(FraudCase.status == status)
@@ -158,12 +148,10 @@ def list_cases(
             
         cases = query.order_by(FraudCase.created_at.desc()).limit(limit).offset(offset).all()
         return [_model_to_dict(c) for c in cases]
-    finally:
-        db.close()
 
 
 def update_case_status(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     case_id: str,
     new_status: str,
     actor: str,
@@ -173,9 +161,8 @@ def update_case_status(
     if new_status not in VALID_STATUSES:
         raise ValueError(f"Status must be one of {VALID_STATUSES}")
 
-    db = SessionLocal()
-    try:
-        case = db.query(FraudCase).filter(FraudCase.case_id == case_id).first()
+    with uow:
+        case = uow.fraud_cases.get_by_case_id(case_id)
         if not case:
             return None
             
@@ -200,23 +187,19 @@ def update_case_status(
         if new_status in ("Resolved", "False_Positive"):
             case.resolved_at = now
             
-        db.commit()
-        db.refresh(case)
+        uow.commit()
         return _model_to_dict(case)
-    finally:
-        db.close()
 
 
 def add_note(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     case_id: str,
     author: str,
     content: str,
 ) -> Optional[Dict[str, Any]]:
     """Add an investigation note to a case."""
-    db = SessionLocal()
-    try:
-        case = db.query(FraudCase).filter(FraudCase.case_id == case_id).first()
+    with uow:
+        case = uow.fraud_cases.get_by_case_id(case_id)
         if not case:
             return None
             
@@ -240,23 +223,19 @@ def add_note(
         case.timeline_json = timeline
         case.updated_at = now
         
-        db.commit()
-        db.refresh(case)
+        uow.commit()
         return _model_to_dict(case)
-    finally:
-        db.close()
 
 
 def assign_case(
-    db_path: Path,
+    uow: AbstractUnitOfWork,
     case_id: str,
     assigned_to: str,
     actor: str,
 ) -> Optional[Dict[str, Any]]:
     """Assign a case to an analyst."""
-    db = SessionLocal()
-    try:
-        case = db.query(FraudCase).filter(FraudCase.case_id == case_id).first()
+    with uow:
+        case = uow.fraud_cases.get_by_case_id(case_id)
         if not case:
             return None
             
@@ -276,18 +255,15 @@ def assign_case(
         case.timeline_json = timeline
         case.updated_at = now
         
-        db.commit()
-        db.refresh(case)
+        uow.commit()
         return _model_to_dict(case)
-    finally:
-        db.close()
 
 
-def get_case_stats(db_path: Path) -> Dict[str, Any]:
+def get_case_stats(uow: AbstractUnitOfWork) -> Dict[str, Any]:
     """Return aggregate stats for the case management dashboard."""
-    db = SessionLocal()
-    try:
+    with uow:
         from sqlalchemy import func
+        db = uow.fraud_cases.session
         
         status_counts_raw = db.query(FraudCase.status, func.count(FraudCase.id)).group_by(FraudCase.status).all()
         status_counts = {status: count for status, count in status_counts_raw}
@@ -308,5 +284,3 @@ def get_case_stats(db_path: Path) -> Dict[str, Any]:
             "by_status": status_counts,
             "by_priority": priority_counts,
         }
-    finally:
-        db.close()
