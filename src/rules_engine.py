@@ -106,6 +106,24 @@ DEFAULT_RULES = [
         "risk_level_bump": "CRITICAL",
         "priority": 100,
     },
+    {
+        "name": "High Velocity Burst Spike",
+        "description": "Real-time 10-minute transaction count exceeds high velocity threshold",
+        "rule_type": "velocity",
+        "condition_json": "velocity_count_10m >= 5",
+        "action": "flag",
+        "risk_level_bump": "HIGH",
+        "priority": 90,
+    },
+    {
+        "name": "Rapid Account Depletion",
+        "description": "Sender account emptied while destination balance is zero",
+        "rule_type": "threshold",
+        "condition_json": "sender_account_emptied == 1 and is_oldbalanceDest_zero == 1",
+        "action": "escalate",
+        "risk_level_bump": "CRITICAL",
+        "priority": 95,
+    },
 ]
 
 
