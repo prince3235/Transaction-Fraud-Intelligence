@@ -284,3 +284,46 @@ def get_case_stats(uow: AbstractUnitOfWork) -> Dict[str, Any]:
             "by_status": status_counts,
             "by_priority": priority_counts,
         }
+
+
+def get_sla_metrics(uow: AbstractUnitOfWork) -> Dict[str, Any]:
+    """Calculate SLA compliance and breach metrics for active cases."""
+    sla_hours = {"Critical": 4, "High": 12, "Medium": 24, "Low": 48}
+    now_dt = datetime.now(timezone.utc)
+    
+    with uow:
+        open_cases = uow.fraud_cases.session.query(FraudCase).filter(
+            FraudCase.status.in_(["Open", "Investigating", "Escalated"])
+        ).all()
+        
+        breached_count = 0
+        breached_cases = []
+        
+        for case in open_cases:
+            try:
+                created_dt = datetime.fromisoformat(case.created_at)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                age_hours = (now_dt - created_dt).total_seconds() / 3600.0
+                max_allowed = sla_hours.get(case.priority, 24)
+                
+                if age_hours > max_allowed:
+                    breached_count += 1
+                    breached_cases.append({
+                        "case_id": case.case_id,
+                        "priority": case.priority,
+                        "age_hours": round(age_hours, 1),
+                        "sla_limit_hours": max_allowed,
+                    })
+            except (ValueError, TypeError):
+                pass
+                
+        total_open = len(open_cases)
+        compliance_pct = round(100.0 * (1.0 - (breached_count / total_open)), 1) if total_open > 0 else 100.0
+        
+        return {
+            "total_active_cases": total_open,
+            "breached_count": breached_count,
+            "compliance_percentage": compliance_pct,
+            "breached_cases": breached_cases,
+        }
